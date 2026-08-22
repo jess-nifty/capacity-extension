@@ -30,6 +30,9 @@ loadCSSFromString(`
     border-radius:10px; box-shadow:0 8px 24px rgba(40,30,90,.14); padding:8px; min-width:230px; max-height:300px; overflow:auto; }
   .cap .panel label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
   .cap .panel label:hover { background:var(--purple-soft); }
+  .cap .panel-actions { display:flex; gap:6px; padding:2px 2px 8px; margin-bottom:6px; border-bottom:1px solid var(--line); }
+  .cap .panel-actions button { flex:1; padding:5px 8px; font-size:12px; border-radius:7px; }
+  .cap .panel-actions button:disabled { opacity:.4; cursor:default; }
   .cap .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:0 0 24px; }
   .cap .kpi { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:15px 17px; }
   .cap .kpi .n { font-size:26px; font-weight:700; letter-spacing:-1px; }
@@ -84,7 +87,7 @@ function lookupDate(cell){
   return (v && typeof v==='object') ? (v.value ?? null) : v;
 }
 
-function Dropdown({label, options, selected, onToggle}){
+function Dropdown({label, options, selected, onToggle, onSetAll}){
   const [open,setOpen]=useState(false);
   const lbl = selected.size===options.length ? 'All' : (selected.size===0 ? 'none' : selected.size+' selected');
   return (
@@ -93,6 +96,12 @@ function Dropdown({label, options, selected, onToggle}){
       {open && <>
         <div style={{position:'fixed',inset:0,zIndex:10}} onClick={()=>setOpen(false)}/>
         <div className="panel">
+          <div className="panel-actions">
+            <button type="button" disabled={selected.size===options.length}
+              onClick={()=>onSetAll(new Set(options))}>Select all</button>
+            <button type="button" disabled={selected.size===0}
+              onClick={()=>onSetAll(new Set())}>Clear</button>
+          </div>
           {options.map(o=>(
             <label key={o}><input type="checkbox" checked={selected.has(o)} onChange={()=>onToggle(o)}/> {o}</label>
           ))}
@@ -228,9 +237,11 @@ function Dashboard({coeTable, allocTable, progTable}){
       <h1>Capacity Overview</h1>
       <div className="controls">
         <Dropdown label="Quarters" options={QUARTERS} selected={selQ}
-          onToggle={q=>setSelQ(s=>{const n=new Set(s); n.has(q)?n.delete(q):n.add(q); return n;})}/>
+          onToggle={q=>setSelQ(s=>{const n=new Set(s); n.has(q)?n.delete(q):n.add(q); return n;})}
+          onSetAll={next=>setSelQ(next)}/>
         <Dropdown label="Teams" options={teamNames} selected={selTeams}
-          onToggle={t=>setSelT(()=>{const n=new Set(selTeams); n.has(t)?n.delete(t):n.add(t); return n;})}/>
+          onToggle={t=>setSelT(()=>{const n=new Set(selTeams); n.has(t)?n.delete(t):n.add(t); return n;})}
+          onSetAll={next=>setSelT(next)}/>
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
       </div>
