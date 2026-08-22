@@ -1,0 +1,14 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.tmp/
+
+# airtable blocks CLI local state (contains your blockId/baseId — keep out of the repo)
+.block/
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
