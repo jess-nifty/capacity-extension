@@ -108,6 +108,45 @@ function App(){
   const allocTable = base.getTableByIdIfExists(ALLOC.table);
   const progTable = base.getTableByIdIfExists(PROG.table);
 
+  // Must run before any useRecords call: useRecords() does not accept a null table,
+  // so an unexposed table would crash rather than show the message below.
+  const missing = [
+    !coeTable && 'CoE',
+    !allocTable && 'Program CoE Allocation',
+    !progTable && 'Programs',
+  ].filter(Boolean);
+
+  if(missing.length){
+    return <div className="cap"><h1>Capacity Overview</h1>
+      <p style={{color:'var(--muted)'}}>Add {missing.join(', ')} as {missing.length>1?'data sources':'a data source'} on this interface page, with the fields referenced in the code visible.</p></div>;
+  }
+
+  // Fields must be preflighted too: getCellValue() resolves the field first and
+  // throws if the interface hasn't exposed it, which would crash rather than report.
+  const REQUIRED_FIELDS = [
+    [coeTable, 'CoE', [[COE.name,'Name'],[COE.wk100,'Working hrs/wk'],[COE.wk70,'Usable hrs/wk (70%)']]],
+    [allocTable, 'Program CoE Allocation', [[ALLOC.coe,'CoE link'],[ALLOC.sub,'Submitted hours'],[ALLOC.acc,'Accepted hours'],[ALLOC.prog,'Program link'],[ALLOC.imd,'In-market date']]],
+    [progTable, 'Programs', [[PROG.bu,'Owning Business Unit'],[PROG.test,'Testing Programs'],[PROG.crit,'Is this Business Critical?']]],
+  ];
+  const missingFields = [];
+  REQUIRED_FIELDS.forEach(([t, tableName, fields]) => {
+    fields.forEach(([id, label]) => {
+      if(!t.getFieldByIdIfExists(id)) missingFields.push(tableName + ' \u2192 ' + label);
+    });
+  });
+
+  if(missingFields.length){
+    return <div className="cap"><h1>Capacity Overview</h1>
+      <p style={{color:'var(--muted)'}}>These fields aren't visible to the extension yet. Turn them on in the element's <b>Fields</b> setting for each table:</p>
+      <ul style={{color:'var(--muted)',lineHeight:1.7}}>
+        {missingFields.map(f => <li key={f}>{f}</li>)}
+      </ul></div>;
+  }
+
+  return <Dashboard coeTable={coeTable} allocTable={allocTable} progTable={progTable}/>;
+}
+
+function Dashboard({coeTable, allocTable, progTable}){
   const coeRecords = useRecords(coeTable);
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
@@ -183,11 +222,6 @@ function App(){
   if(sortMode==='az') cards.sort((a,b)=>a.n.localeCompare(b.n));
   else if(sortMode==='za') cards.sort((a,b)=>b.n.localeCompare(a.n));
   else cards.sort((a,b)=>util(b)-util(a));
-
-  if(!coeTable || !allocTable || !progTable){
-    return <div className="cap"><h1>Capacity Overview</h1>
-      <p style={{color:'var(--muted)'}}>Add these tables as data sources on this interface: CoE, Program CoE Allocation, Programs (with the fields referenced in the code).</p></div>;
-  }
 
   return (
     <div className="cap">
