@@ -9,12 +9,21 @@ import React, {useState, useMemo} from 'react';
 
 // ---- Field IDs (stable) ----
 const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGdC0wZqfDuiy', wk70:'fldvuSkFOY4yp6dUs'};
-const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD'};
-const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2'};
+const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
+              status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h'};
+const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
+              quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd'};
 
 const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','YAds','Fantasy'];
-const QUARTERS = ['Q1','Q2','Q3','Q4'];
 const WEEKS = 13;
+
+// Status buckets, taken from the "Accepted & Submitted Capacity Planning" dashboard so
+// the numbers here agree with it. Submitted = everything except Rejected; Accepted is
+// the two approved statuses. Choice names are compared trimmed: "Rejected " carries a
+// trailing space in the base.
+const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
+const REJECTED_STATUS = 'Rejected';
+const MAX_BARS = 250;
 
 loadCSSFromString(`
   .cap * { box-sizing:border-box; }
@@ -63,6 +72,33 @@ loadCSSFromString(`
   .cap .tag { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.4px; }
   .cap .t-green{background:var(--green-bg);color:var(--green);} .cap .t-amber{background:var(--amber-bg);color:var(--amber);}
   .cap .t-red{background:var(--red-bg);color:var(--red);} .cap .t-grey{background:#eee;color:#777;}
+  .cap .ctx { font-size:12px; color:var(--muted); margin:-6px 0 14px; }
+  .cap .ctx b { color:var(--ink); }
+  .cap .ctx .warn { color:var(--amber); }
+  .cap .tl { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:15px 17px 18px; --lane:190px; }
+  .cap .tl-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 14px; }
+  .cap .seg { display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+  .cap .seg button { border:none; border-radius:0; padding:6px 13px; font-size:12.5px; background:transparent; }
+  .cap .seg button + button { border-left:1px solid var(--line); }
+  .cap .seg button[data-on="1"] { background:var(--purple); color:#fff; }
+  .cap .tl-note { font-size:12px; color:var(--muted); }
+  .cap .tl-scroll { overflow-x:auto; }
+  .cap .tl-grid { min-width:660px; }
+  .cap .tl-axis { position:relative; height:18px; margin-left:var(--lane); border-bottom:1px solid var(--line); }
+  .cap .tl-axis span { position:absolute; top:0; font-size:10.5px; color:var(--muted); transform:translateX(-50%); white-space:nowrap; }
+  .cap .tl-coe { display:flex; align-items:baseline; gap:8px; font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.5px; color:var(--purple); margin:16px 0 5px; }
+  .cap .tl-coe i { font-style:normal; font-weight:600; color:var(--muted); letter-spacing:0; text-transform:none; font-size:11px; }
+  .cap .tl-row { display:grid; grid-template-columns:var(--lane) 1fr; align-items:center; min-height:24px; }
+  .cap .tl-lbl { font-size:12px; padding-right:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .tl-track { position:relative; height:18px; }
+  .cap .tl-track::before { content:''; position:absolute; left:0; right:0; top:8px; height:1px; background:var(--line); }
+  .cap .tl-bar { position:absolute; top:2px; height:14px; min-width:6px; border-radius:7px; background:var(--purple);
+    display:flex; align-items:center; padding:0 7px; overflow:hidden; }
+  .cap .tl-bar b { font-size:10px; color:#fff; font-weight:600; white-space:nowrap; }
+  .cap .tl-bar.crit { background:var(--red); }
+  .cap .tl-now { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--red); opacity:.45; }
+  .cap .tl-empty { font-size:13px; color:var(--muted); padding:18px 2px; }
   @media (prefers-color-scheme: dark){ .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
   @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:repeat(2,1fr);} }
   @media(max-width:640px){ .cap .grid{grid-template-columns:1fr;} }
@@ -74,17 +110,68 @@ const band = v => v>0.70?'red':(v>=0.50?'amber':'green');
 const BC = {green:'var(--green)',amber:'var(--amber)',red:'var(--red)'};
 
 function firstLink(cell){ return (cell && cell[0]) ? cell[0] : null; }
+const UNASSIGNED = 'No quarter set';
+
+// "2026-05-11" → {q:'Q2', y:'2026'}
 function quarterOf(dateStr){
   if(!dateStr) return null;
-  const m = parseInt(String(dateStr).slice(5,7),10);
+  const s = String(dateStr);
+  const m = parseInt(s.slice(5,7),10);
   if(!m) return null;
-  return 'Q'+Math.ceil(m/3);
+  return {q:'Q'+Math.ceil(m/3), y:s.slice(0,4)};
 }
 function lookupDate(cell){
-  // multipleLookupValues → [{value}] or ["2026-05-11"]
+  // multipleLookupValues → [{value}] or ["2026-05-11"]; value can itself be an array
   if(!cell || !cell.length) return null;
-  const v = cell[0];
-  return (v && typeof v==='object') ? (v.value ?? null) : v;
+  let v = cell[0];
+  if(v && typeof v==='object' && !Array.isArray(v)) v = v.value;
+  if(Array.isArray(v)) v = v[0];
+  return v ?? null;
+}
+// The key the filter matches on: 'Q4 2026' when the year is known, 'Q4' when it
+// isn't. Bucketing on a bare 'Q4' merged Q4 2026 with any other year's Q4.
+function qKey(q, y){ return q ? (y ? q+' '+y : q) : UNASSIGNED; }
+function qSortValue(k){
+  if(k===UNASSIGNED) return Infinity;
+  const m = /^Q([1-4])(?: (\d{4}))?$/.exec(k);
+  if(!m) return Infinity;
+  return (m[2] ? parseInt(m[2],10) : 0)*10 + parseInt(m[1],10);
+}
+function currentQKey(){
+  const d = new Date();
+  return qKey('Q'+Math.ceil((d.getMonth()+1)/3), String(d.getFullYear()));
+}
+
+// Date-only cells ("2026-05-11") are pinned to UTC so a bar doesn't shift a day
+// depending on the viewer's timezone. Positions are relative, so UTC throughout.
+function parseDate(v){
+  if(!v) return null;
+  const s = String(v);
+  const t = Date.parse(s.length<=10 ? s+'T00:00:00Z' : s);
+  return isFinite(t) ? t : null;
+}
+function lookupText(cell){
+  if(cell==null) return null;
+  if(Array.isArray(cell)){
+    if(!cell.length) return null;
+    let v = cell[0];
+    if(v && typeof v==='object') v = v.value ?? v.name ?? null;
+    return v==null ? null : String(v).trim();
+  }
+  if(typeof cell==='object') return (cell.name ?? cell.value ?? null);
+  return String(cell).trim();
+}
+// First of each month inside the domain, for the axis.
+function monthTicks(min,max){
+  const out=[]; const d=new Date(min);
+  let y=d.getUTCFullYear(), m=d.getUTCMonth();
+  let t=Date.UTC(y,m,1);
+  while(t<min){ m++; if(m>11){m=0;y++;} t=Date.UTC(y,m,1); }
+  while(t<=max && out.length<48){
+    out.push({t, label:new Date(t).toLocaleDateString(undefined,{month:'short',year:'2-digit',timeZone:'UTC'})});
+    m++; if(m>11){m=0;y++;} t=Date.UTC(y,m,1);
+  }
+  return out;
 }
 
 function Dropdown({label, options, selected, onToggle, onSetAll}){
@@ -107,6 +194,107 @@ function Dropdown({label, options, selected, onToggle, onSetAll}){
           ))}
         </div>
       </>}
+    </div>
+  );
+}
+
+// Rebuilds the two timelines from the "Accepted & Submitted Capacity Planning"
+// dashboard: allocations laid out across Est. Work Start -> End Date, switchable
+// between the accepted and submitted status buckets. Reads the same table the rest
+// of the dashboard already loads, so it needs no extra data source.
+function Timeline({rows, hasStatus, hasDates}){
+  const [mode, setMode] = useState('accepted');
+
+  const inMode = useMemo(()=>{
+    if(!hasStatus) return rows;
+    return mode==='accepted' ? rows.filter(r=>r.isAccepted) : rows.filter(r=>!r.isRejected);
+  },[rows, mode, hasStatus]);
+
+  // A bar needs both ends; anything half-dated is counted in the note instead of
+  // being drawn at a guessed position.
+  const dated = useMemo(()=>
+    inMode.filter(r=>r.s!=null && r.e!=null && r.e>=r.s).sort((a,b)=>a.s-b.s)
+  ,[inMode]);
+
+  const domain = useMemo(()=>{
+    if(!dated.length) return null;
+    let min=Infinity, max=-Infinity;
+    dated.forEach(r=>{ if(r.s<min) min=r.s; if(r.e>max) max=r.e; });
+    if(max<=min) max = min + 30*86400000;
+    const pad = (max-min)*0.02;
+    return {min:min-pad, max:max+pad};
+  },[dated]);
+
+  const groups = useMemo(()=>{
+    const m = new Map();
+    dated.slice(0, MAX_BARS).forEach(r=>{
+      if(!m.has(r.coe)) m.set(r.coe, []);
+      m.get(r.coe).push(r);
+    });
+    return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+  },[dated]);
+
+  if(!hasDates){
+    return <div className="tl"><div className="tl-empty">
+      Turn on <b>Est. Work Start Date</b> and <b>Est. Work End Date</b> on Program CoE
+      Allocation in this element's Fields setting to draw the timeline.
+    </div></div>;
+  }
+
+  const span = domain ? (domain.max - domain.min) : 1;
+  const pos = t => ((t - domain.min) / span) * 100;
+  const ticks = domain ? monthTicks(domain.min, domain.max) : [];
+  const now = Date.now();
+  const showNow = !!domain && now >= domain.min && now <= domain.max;
+  const undated = inMode.length - dated.length;
+  const capped = Math.max(0, dated.length - MAX_BARS);
+
+  return (
+    <div className="tl">
+      <div className="tl-head">
+        {hasStatus && <div className="seg">
+          <button data-on={mode==='accepted'?'1':'0'} onClick={()=>setMode('accepted')}>Accepted</button>
+          <button data-on={mode==='submitted'?'1':'0'} onClick={()=>setMode('submitted')}>Submitted</button>
+        </div>}
+        <span className="tl-note">
+          {dated.length} allocation{dated.length===1?'':'s'}
+          {undated>0 ? ' · '+undated+' hidden (missing a start or end date)' : ''}
+          {capped>0 ? ' · '+capped+' beyond the first '+MAX_BARS : ''}
+          {!hasStatus ? " · Program Status isn't exposed, showing everything" : ''}
+        </span>
+      </div>
+
+      {!dated.length ? (
+        <div className="tl-empty">Nothing to plot for this selection.</div>
+      ) : (
+        <div className="tl-scroll"><div className="tl-grid">
+          <div className="tl-axis">
+            {ticks.map(t=><span key={t.t} style={{left:pos(t.t)+'%'}}>{t.label}</span>)}
+          </div>
+          {groups.map(([coe, items])=>(
+            <div key={coe}>
+              <div className="tl-coe">{coe} <i>{items.length}</i></div>
+              {items.map(r=>{
+                const left = pos(r.s), w = Math.max(0.6, pos(r.e) - left);
+                const hrs = (mode==='accepted' && r.acc) ? r.acc : r.sub;
+                return (
+                  <div className="tl-row" key={r.id}>
+                    <div className="tl-lbl" title={r.pname}>{r.pname}</div>
+                    <div className="tl-track">
+                      {showNow && <span className="tl-now" style={{left:pos(now)+'%'}}/>}
+                      <div className={'tl-bar'+(r.crit?' crit':'')}
+                           style={{left:left+'%', width:w+'%'}}
+                           title={r.pname+' — '+fmt(r.sub)+' submitted hrs'+(r.acc?', '+fmt(r.acc)+' accepted':'')+(r.st?' · '+r.st:'')}>
+                        <b>{fmt(hrs)}h</b>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div></div>
+      )}
     </div>
   );
 }
@@ -160,7 +348,6 @@ function Dashboard({coeTable, allocTable, progTable}){
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
 
-  const [selQ, setSelQ] = useState(new Set(['Q2']));
   const [sortMode, setSortMode] = useState('az');
 
   const teams = useMemo(()=>{
@@ -176,20 +363,36 @@ function Dashboard({coeTable, allocTable, progTable}){
   const teamNames = useMemo(()=>teams.map(t=>t.n).sort(),[teams]);
   const selTeams = selT ?? new Set(teamNames);
 
-  // program → {bu, test, crit}
+  // Programs carries the quarter people actually set (a single-select), and it is
+  // populated far more reliably than In Market Start Date — most programs have no
+  // date at all, so deriving the quarter from the date dropped them from every
+  // bucket. Use the select when it's exposed; fall back to the date otherwise.
+  const hasQuarterField = !!progTable.getFieldByIdIfExists(PROG.quarter);
+  const hasYearField = !!progTable.getFieldByIdIfExists(PROG.year);
+  // Timeline + status inputs are optional: the dashboard still works without them,
+  // so they are feature-detected rather than added to the hard preflight.
+  const hasStatusField = !!allocTable.getFieldByIdIfExists(ALLOC.status);
+  const hasTimelineFields = !!allocTable.getFieldByIdIfExists(ALLOC.start)
+                         && !!allocTable.getFieldByIdIfExists(ALLOC.end);
+
+  // program → {bu, test, crit, q, y}
   const progMap = useMemo(()=>{
     const m = new Map();
     (progRecords||[]).forEach(r=>{
       const buLink = firstLink(r.getCellValue(PROG.bu));
       const crit = r.getCellValue(PROG.crit);
+      const qSel = hasQuarterField ? r.getCellValue(PROG.quarter) : null;
+      const ySel = hasYearField ? r.getCellValue(PROG.year) : null;
       m.set(r.id, {
         bu: buLink ? buLink.name : 'Unassigned',
         test: r.getCellValue(PROG.test)===true,
         crit: !!(crit && crit.name && crit.name.toUpperCase()==='YES'),
+        q: (qSel && qSel.name) ? String(qSel.name).trim() : null,
+        y: (ySel && ySel.name) ? String(ySel.name).trim() : null,
       });
     });
     return m;
-  },[progRecords]);
+  },[progRecords, hasQuarterField, hasYearField]);
 
   // allocations → normalized rows
   const rows = useMemo(()=>{
@@ -197,32 +400,72 @@ function Dashboard({coeTable, allocTable, progTable}){
       const coe = firstLink(r.getCellValue(ALLOC.coe));
       const prog = firstLink(r.getCellValue(ALLOC.prog));
       const pm = prog ? progMap.get(prog.id) : null;
+      const fromDate = quarterOf(lookupDate(r.getCellValue(ALLOC.imd)));
+      // Never mix sources: if the program names a quarter, its year comes from the
+      // program too, otherwise both come from the in-market date.
+      let q = null, y = null;
+      if(pm && pm.q){ q = pm.q; y = pm.y; }
+      else if(fromDate){ q = fromDate.q; y = fromDate.y; }
+      const st = hasStatusField ? lookupText(r.getCellValue(ALLOC.status)) : null;
       return {
+        id: r.id,
+        pid: prog ? prog.id : null,
+        pname: prog ? prog.name : '(no program)',
         coe: coe ? coe.name : null,
         sub: Number(r.getCellValue(ALLOC.sub))||0,
         acc: Number(r.getCellValue(ALLOC.acc))||0,
-        q: quarterOf(lookupDate(r.getCellValue(ALLOC.imd))),
+        qk: qKey(q, y),
         bu: pm ? pm.bu : 'Unassigned',
         crit: pm ? pm.crit : false,
         test: pm ? pm.test : false,
+        st,
+        // Both false when Program Status isn't exposed, so every total keeps its
+        // previous unfiltered behaviour rather than silently dropping to zero.
+        isAccepted: st ? ACCEPTED_STATUSES.has(st) : false,
+        isRejected: st ? st === REJECTED_STATUS : false,
+        s: hasTimelineFields ? parseDate(r.getCellValue(ALLOC.start)) : null,
+        e: hasTimelineFields ? parseDate(r.getCellValue(ALLOC.end)) : null,
       };
     }).filter(x=>x.coe && !x.test && x.coe!=='Vendor / Agency');
-  },[allocRecords, progMap]);
+  },[allocRecords, progMap, hasStatusField, hasTimelineFields]);
 
-  const nQ = Math.max(selQ.size,1);
-  const inQ = q => selQ.has(q);
-  const demandOf = name => rows.reduce((s,x)=>s+((x.coe===name && inQ(x.q))?x.sub:0),0);
+  // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
+  // only offers quarters that work is actually scheduled in, and shows the year.
+  const quarterOptions = useMemo(()=>{
+    const s = new Set(rows.map(x=>x.qk));
+    return [...s].sort((a,b)=>(qSortValue(a)-qSortValue(b)) || a.localeCompare(b));
+  },[rows]);
+
+  const [selQRaw, setSelQ] = useState(null);
+  const defaultQ = useMemo(()=>{
+    const now = currentQKey();
+    return new Set(quarterOptions.includes(now) ? [now] : quarterOptions);
+  },[quarterOptions]);
+  const selQ = selQRaw ?? defaultQ;
+
+  // Capacity scales with how many real quarters are selected — "No quarter set"
+  // is not a quarter and must not multiply anyone's capacity.
+  const nQ = Math.max([...selQ].filter(k=>k!==UNASSIGNED).length,1);
+  const inQ = k => selQ.has(k);
+  const demandOf = name => rows.reduce((s,x)=>s+((x.coe===name && inQ(x.qk) && !x.isRejected)?x.sub:0),0);
 
   // BU table (respects team + quarter filters)
   const buAgg = {}; BU_ORDER.forEach(b=>buAgg[b]={sub:0,acc:0,crit:0});
   rows.forEach(x=>{
-    if(!selTeams.has(x.coe) || !inQ(x.q)) return;
+    if(!selTeams.has(x.coe) || !inQ(x.qk)) return;
     if(!buAgg[x.bu]) return; // Unassigned & others not shown
-    buAgg[x.bu].sub += x.sub; buAgg[x.bu].acc += x.acc; if(x.crit) buAgg[x.bu].crit += x.sub;
+    if(x.isRejected) return;                       // Submitted = everything but Rejected
+    buAgg[x.bu].sub += x.sub;
+    if(!hasStatusField || x.isAccepted) buAgg[x.bu].acc += x.acc;
+    if(x.crit) buAgg[x.bu].crit += x.sub;
   });
   const tot = {sub:0,acc:0,crit:0}; BU_ORDER.forEach(b=>{tot.sub+=buAgg[b].sub;tot.acc+=buAgg[b].acc;tot.crit+=buAgg[b].crit;});
 
   const shown = teams.filter(t=>selTeams.has(t.n));
+  const visibleRows = rows.filter(x=>selTeams.has(x.coe) && inQ(x.qk));
+  const progInView = new Set(
+    rows.filter(x=>x.pid && selTeams.has(x.coe) && inQ(x.qk)).map(x=>x.pid)
+  ).size;
   const totCap = shown.reduce((s,t)=>s+t.wk70*WEEKS*nQ,0);
   const totSub = shown.reduce((s,t)=>s+demandOf(t.n),0);
 
@@ -236,7 +479,7 @@ function Dashboard({coeTable, allocTable, progTable}){
     <div className="cap">
       <h1>Capacity Overview</h1>
       <div className="controls">
-        <Dropdown label="Quarters" options={QUARTERS} selected={selQ}
+        <Dropdown label="Quarters" options={quarterOptions} selected={selQ}
           onToggle={q=>setSelQ(s=>{const n=new Set(s); n.has(q)?n.delete(q):n.add(q); return n;})}
           onSetAll={next=>setSelQ(next)}/>
         <Dropdown label="Teams" options={teamNames} selected={selTeams}
@@ -246,8 +489,15 @@ function Dashboard({coeTable, allocTable, progTable}){
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
       </div>
 
+      <div className="ctx">
+        Showing <b>{selQ.size===0 ? 'no quarters' : [...selQ].sort((a,b)=>qSortValue(a)-qSortValue(b)).join(', ')}</b>
+        {' · '}<b>{shown.length}</b> of {teams.length} teams
+        {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
+        {!hasStatusField && <span className="warn">{' · '}Program Status isn't exposed — rejected programs are still counted</span>}
+      </div>
+
       <div className="kpis">
-        <div className="kpi"><div className="n">{progRecords?progRecords.length:'—'}</div><div className="l">Programs in system</div></div>
+        <div className="kpi"><div className="n">{progInView}</div><div className="l">Programs in selection <small>(of {progRecords?progRecords.length:'—'})</small></div></div>
         <div className="kpi"><div className="n">{shown.length}</div><div className="l">Teams shown</div></div>
         <div className="kpi"><div className="n">{fmt(totCap)} <small>hrs</small></div><div className="l">Usable capacity, selected quarter(s)</div></div>
         <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Submitted hours (selected)</div></div>
@@ -298,6 +548,9 @@ function Dashboard({coeTable, allocTable, progTable}){
           );
         })}
       </div>
+
+      <div className="st">Delivery Timeline</div>
+      <Timeline rows={visibleRows} hasStatus={hasStatusField} hasDates={hasTimelineFields}/>
     </div>
   );
 }
