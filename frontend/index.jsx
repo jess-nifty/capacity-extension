@@ -10,7 +10,7 @@ import React, {useState, useMemo} from 'react';
 // ---- Field IDs (stable) ----
 const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGdC0wZqfDuiy', wk70:'fldvuSkFOY4yp6dUs'};
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
-              status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h'};
+              status:'fld02CmuABiOFdxn9'};
 const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
               quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN'};
 
@@ -29,7 +29,14 @@ const isExcludedCoE = n => !n || EXCLUDED_COES.has(String(n).trim());
 
 const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
 const REJECTED_STATUS = 'Rejected';
-const MAX_BARS = 250;
+
+// "Accepted & Submitted Capacity Planning" in the Marketing Operations interface.
+// The query string carries that page's own status filters, so the link lands on the
+// same view rather than an unfiltered one. /edit is deliberately left off so the
+// link opens the page normally instead of in the editor.
+const CAPACITY_PAGE_URL = 'https://airtable.com/appE8STdMZa2kq9eb/pagTD4p2yXFwccD9T'
+  + '?csiYu=b%3AWzAsWyJGZHhuOSIsNixbInNlbHM2TlNPRXRPY3VkRzVSIiwic2VsRzVFc1FnTkM4SzUzMkIiXSwiV2ZzSkUiXV0'
+  + '&9EabC=b%3AWzAsWyJGZHhuOSIsNixbInNlbHk4MHJmYUxDUmdEbTZWIiwic2VsdVNnY3d3Z2NNSXN3NTIiLCJzZWw1NkVjbFdxWktJcUlTWiIsInNlbFhNMk1lZDZaMElyU2t3Iiwic2VsRzVFc1FnTkM4SzUzMkIiLCJzZWxzNk5TT0V0T2N1ZEc1UiJdLCJLUkpWViJdXQ';
 
 loadCSSFromString(`
   .cap * { box-sizing:border-box; }
@@ -78,33 +85,12 @@ loadCSSFromString(`
   .cap .tag { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.4px; }
   .cap .t-green{background:var(--green-bg);color:var(--green);} .cap .t-amber{background:var(--amber-bg);color:var(--amber);}
   .cap .t-red{background:var(--red-bg);color:var(--red);} .cap .t-grey{background:#eee;color:#777;}
+  .cap .ext { margin-left:auto; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+    border:1px solid var(--line); background:#fff; border-radius:9px; padding:7px 12px; color:var(--purple); font-weight:600; }
+  .cap .ext:hover { background:var(--purple-soft); }
   .cap .ctx { font-size:12px; color:var(--muted); margin:-6px 0 14px; }
   .cap .ctx b { color:var(--ink); }
   .cap .ctx .warn { color:var(--amber); }
-  .cap .tl { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:15px 17px 18px; --lane:190px; }
-  .cap .tl-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 14px; }
-  .cap .seg { display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
-  .cap .seg button { border:none; border-radius:0; padding:6px 13px; font-size:12.5px; background:transparent; }
-  .cap .seg button + button { border-left:1px solid var(--line); }
-  .cap .seg button[data-on="1"] { background:var(--purple); color:#fff; }
-  .cap .tl-note { font-size:12px; color:var(--muted); }
-  .cap .tl-scroll { overflow-x:auto; }
-  .cap .tl-grid { min-width:660px; }
-  .cap .tl-axis { position:relative; height:18px; margin-left:var(--lane); border-bottom:1px solid var(--line); }
-  .cap .tl-axis span { position:absolute; top:0; font-size:10.5px; color:var(--muted); transform:translateX(-50%); white-space:nowrap; }
-  .cap .tl-coe { display:flex; align-items:baseline; gap:8px; font-size:11px; font-weight:700; text-transform:uppercase;
-    letter-spacing:.5px; color:var(--purple); margin:16px 0 5px; }
-  .cap .tl-coe i { font-style:normal; font-weight:600; color:var(--muted); letter-spacing:0; text-transform:none; font-size:11px; }
-  .cap .tl-row { display:grid; grid-template-columns:var(--lane) 1fr; align-items:center; min-height:24px; }
-  .cap .tl-lbl { font-size:12px; padding-right:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .cap .tl-track { position:relative; height:18px; }
-  .cap .tl-track::before { content:''; position:absolute; left:0; right:0; top:8px; height:1px; background:var(--line); }
-  .cap .tl-bar { position:absolute; top:2px; height:14px; min-width:6px; border-radius:7px; background:var(--purple);
-    display:flex; align-items:center; padding:0 7px; overflow:hidden; }
-  .cap .tl-bar b { font-size:10px; color:#fff; font-weight:600; white-space:nowrap; }
-  .cap .tl-bar.crit { background:var(--red); }
-  .cap .tl-now { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--red); opacity:.45; }
-  .cap .tl-empty { font-size:13px; color:var(--muted); padding:18px 2px; }
   @media (prefers-color-scheme: dark){ .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
   @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:repeat(2,1fr);} }
   @media(max-width:640px){ .cap .grid{grid-template-columns:1fr;} }
@@ -152,14 +138,6 @@ function currentQKey(){
   return qKey('Q'+Math.ceil((d.getMonth()+1)/3), String(d.getFullYear()));
 }
 
-// Date-only cells ("2026-05-11") are pinned to UTC so a bar doesn't shift a day
-// depending on the viewer's timezone. Positions are relative, so UTC throughout.
-function parseDate(v){
-  if(!v) return null;
-  const s = String(v);
-  const t = Date.parse(s.length<=10 ? s+'T00:00:00Z' : s);
-  return isFinite(t) ? t : null;
-}
 function lookupText(cell){
   if(cell==null) return null;
   if(Array.isArray(cell)){
@@ -170,18 +148,6 @@ function lookupText(cell){
   }
   if(typeof cell==='object') return (cell.name ?? cell.value ?? null);
   return String(cell).trim();
-}
-// First of each month inside the domain, for the axis.
-function monthTicks(min,max){
-  const out=[]; const d=new Date(min);
-  let y=d.getUTCFullYear(), m=d.getUTCMonth();
-  let t=Date.UTC(y,m,1);
-  while(t<min){ m++; if(m>11){m=0;y++;} t=Date.UTC(y,m,1); }
-  while(t<=max && out.length<48){
-    out.push({t, label:new Date(t).toLocaleDateString(undefined,{month:'short',year:'2-digit',timeZone:'UTC'})});
-    m++; if(m>11){m=0;y++;} t=Date.UTC(y,m,1);
-  }
-  return out;
 }
 
 function Dropdown({label, options, selected, onToggle, onSetAll}){
@@ -204,100 +170,6 @@ function Dropdown({label, options, selected, onToggle, onSetAll}){
           ))}
         </div>
       </>}
-    </div>
-  );
-}
-
-// Rebuilds the Submitted view of the "Accepted & Submitted Capacity Planning"
-// page: allocations laid out across Est. Work Start -> End Date, grouped by CoE.
-// Submitted is that page's own bucket — every status except Rejected. The Accepted
-// view is deliberately not reproduced here.
-function Timeline({rows, hasStatus, hasDates}){
-  const inMode = useMemo(()=>
-    hasStatus ? rows.filter(r=>!r.isRejected) : rows
-  ,[rows, hasStatus]);
-
-  // A bar needs both ends; anything half-dated is counted in the note instead of
-  // being drawn at a guessed position.
-  const dated = useMemo(()=>
-    inMode.filter(r=>r.s!=null && r.e!=null && r.e>=r.s).sort((a,b)=>a.s-b.s)
-  ,[inMode]);
-
-  const domain = useMemo(()=>{
-    if(!dated.length) return null;
-    let min=Infinity, max=-Infinity;
-    dated.forEach(r=>{ if(r.s<min) min=r.s; if(r.e>max) max=r.e; });
-    if(max<=min) max = min + 30*86400000;
-    const pad = (max-min)*0.02;
-    return {min:min-pad, max:max+pad};
-  },[dated]);
-
-  const groups = useMemo(()=>{
-    const m = new Map();
-    dated.slice(0, MAX_BARS).forEach(r=>{
-      if(!m.has(r.coe)) m.set(r.coe, []);
-      m.get(r.coe).push(r);
-    });
-    return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
-  },[dated]);
-
-  if(!hasDates){
-    return <div className="tl"><div className="tl-empty">
-      Turn on <b>Est. Work Start Date</b> and <b>Est. Work End Date</b> on Program CoE
-      Allocation in this element's Fields setting to draw the timeline.
-    </div></div>;
-  }
-
-  const span = domain ? (domain.max - domain.min) : 1;
-  const pos = t => ((t - domain.min) / span) * 100;
-  const ticks = domain ? monthTicks(domain.min, domain.max) : [];
-  const now = Date.now();
-  const showNow = !!domain && now >= domain.min && now <= domain.max;
-  const undated = inMode.length - dated.length;
-  const capped = Math.max(0, dated.length - MAX_BARS);
-
-  return (
-    <div className="tl">
-      <div className="tl-head">
-        <span className="tl-note">
-          {dated.length} allocation{dated.length===1?'':'s'}
-          {undated>0 ? ' · '+undated+' hidden (missing a start or end date)' : ''}
-          {capped>0 ? ' · '+capped+' beyond the first '+MAX_BARS : ''}
-          {!hasStatus ? " · Program Status isn't exposed, showing everything" : ''}
-        </span>
-      </div>
-
-      {!dated.length ? (
-        <div className="tl-empty">Nothing to plot for this selection.</div>
-      ) : (
-        <div className="tl-scroll"><div className="tl-grid">
-          <div className="tl-axis">
-            {ticks.map(t=><span key={t.t} style={{left:pos(t.t)+'%'}}>{t.label}</span>)}
-          </div>
-          {groups.map(([coe, items])=>(
-            <div key={coe}>
-              <div className="tl-coe">{coe} <i>{items.length}</i></div>
-              {items.map(r=>{
-                const left = pos(r.s), w = Math.max(0.6, pos(r.e) - left);
-                const hrs = r.sub;
-                return (
-                  <div className="tl-row" key={r.id}>
-                    <div className="tl-lbl" title={r.pname}>{r.pname}</div>
-                    <div className="tl-track">
-                      {showNow && <span className="tl-now" style={{left:pos(now)+'%'}}/>}
-                      <div className={'tl-bar'+(r.crit?' crit':'')}
-                           style={{left:left+'%', width:w+'%'}}
-                           title={r.pname+' — '+fmt(r.sub)+' submitted hrs'+(r.acc?', '+fmt(r.acc)+' accepted':'')+(r.st?' · '+r.st:'')}>
-                        <b>{fmt(hrs)}h</b>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div></div>
-      )}
     </div>
   );
 }
@@ -372,7 +244,7 @@ function Dashboard({coeTable, allocTable, progTable}){
   // bucket. Use the select when it's exposed; fall back to the date otherwise.
   const hasQuarterField = !!progTable.getFieldByIdIfExists(PROG.quarter);
   const hasYearField = !!progTable.getFieldByIdIfExists(PROG.year);
-  // Timeline + status inputs are optional: the dashboard still works without them,
+  // Status is optional: the dashboard still works without it,
   // so they are feature-detected rather than added to the hard preflight.
   // Status can come from either end. Programs holds the real single-select; the
   // allocation carries a lookup of it. Either will do, so only warn when neither
@@ -380,8 +252,6 @@ function Dashboard({coeTable, allocTable, progTable}){
   const hasProgStatus = !!progTable.getFieldByIdIfExists(PROG.status);
   const hasAllocStatus = !!allocTable.getFieldByIdIfExists(ALLOC.status);
   const hasStatusField = hasProgStatus || hasAllocStatus;
-  const hasTimelineFields = !!allocTable.getFieldByIdIfExists(ALLOC.start)
-                         && !!allocTable.getFieldByIdIfExists(ALLOC.end);
 
   // program → {bu, test, crit, q, y}
   const progMap = useMemo(()=>{
@@ -435,11 +305,9 @@ function Dashboard({coeTable, allocTable, progTable}){
         // previous unfiltered behaviour rather than silently dropping to zero.
         isAccepted: st ? ACCEPTED_STATUSES.has(st) : false,
         isRejected: st ? st === REJECTED_STATUS : false,
-        s: hasTimelineFields ? parseDate(r.getCellValue(ALLOC.start)) : null,
-        e: hasTimelineFields ? parseDate(r.getCellValue(ALLOC.end)) : null,
       };
     }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
-  },[allocRecords, progMap, hasAllocStatus, hasTimelineFields]);
+  },[allocRecords, progMap, hasAllocStatus]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -474,7 +342,6 @@ function Dashboard({coeTable, allocTable, progTable}){
   const tot = {sub:0,acc:0,crit:0}; BU_ORDER.forEach(b=>{tot.sub+=buAgg[b].sub;tot.acc+=buAgg[b].acc;tot.crit+=buAgg[b].crit;});
 
   const shown = teams.filter(t=>selTeams.has(t.n));
-  const visibleRows = rows.filter(x=>selTeams.has(x.coe) && inQ(x.qk));
   // Submitted programs, using the same bucket as the hours: everything the
   // "Accepted & Submitted Capacity Planning" page treats as submitted, i.e. every
   // status except Rejected. The denominator is the submitted programs across all
@@ -505,6 +372,8 @@ function Dashboard({coeTable, allocTable, progTable}){
           onSetAll={next=>setSelT(next)}/>
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
+        <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
+          Accepted &amp; Submitted Capacity Planning ↗</a>
       </div>
 
       <div className="ctx">
@@ -569,9 +438,6 @@ function Dashboard({coeTable, allocTable, progTable}){
           );
         })}
       </div>
-
-      <div className="st">Submitted Capacity Planning</div>
-      <Timeline rows={visibleRows} hasStatus={hasStatusField} hasDates={hasTimelineFields}/>
     </div>
   );
 }
