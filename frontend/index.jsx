@@ -313,8 +313,11 @@ function Dashboard({coeTable, allocTable, progTable}){
   // only offers quarters that work is actually scheduled in, and shows the year.
   const quarterOptions = useMemo(()=>{
     const s = new Set(rows.map(x=>x.qk));
+    // Programs are included as well: almost none of them have allocation rows yet,
+    // so options built from allocations alone offered barely any quarters.
+    progMap.forEach(pm=>{ if(!pm.test) s.add(qKey(pm.q, pm.y)); });
     return [...s].sort((a,b)=>(qSortValue(a)-qSortValue(b)) || a.localeCompare(b));
-  },[rows]);
+  },[rows, progMap]);
 
   const [selQRaw, setSelQ] = useState(null);
   const defaultQ = useMemo(()=>{
@@ -342,15 +345,21 @@ function Dashboard({coeTable, allocTable, progTable}){
   const tot = {sub:0,acc:0,crit:0}; BU_ORDER.forEach(b=>{tot.sub+=buAgg[b].sub;tot.acc+=buAgg[b].acc;tot.crit+=buAgg[b].crit;});
 
   const shown = teams.filter(t=>selTeams.has(t.n));
-  // Submitted programs, using the same bucket as the hours: everything the
-  // "Accepted & Submitted Capacity Planning" page treats as submitted, i.e. every
-  // status except Rejected. The denominator is the submitted programs across all
-  // quarters and teams, so "x of y" compares like with like as the filters move.
-  const submittedRows = rows.filter(x=>x.pid && !x.isRejected);
-  const progTotal = new Set(submittedRows.map(x=>x.pid)).size;
-  const progInView = new Set(
-    submittedRows.filter(x=>selTeams.has(x.coe) && inQ(x.qk)).map(x=>x.pid)
-  ).size;
+  // Counted from Programs, not from allocations: the overwhelming majority of live
+  // programs have no Program CoE Allocation rows yet, so an allocation-derived count
+  // reported a handful instead of the real figure. Submitted means every status
+  // except Rejected, matching the hours. The Teams filter deliberately does not
+  // apply — a program spans several CoEs, so there is no one team it belongs to.
+  const progStats = useMemo(()=>{
+    let inView = 0, total = 0;
+    progMap.forEach(pm=>{
+      if(pm.test) return;
+      if(pm.st === REJECTED_STATUS) return;
+      total++;
+      if(inQ(qKey(pm.q, pm.y))) inView++;
+    });
+    return {inView, total};
+  },[progMap, selQ]);
   const totCap = shown.reduce((s,t)=>s+t.wk70*WEEKS*nQ,0);
   const totSub = shown.reduce((s,t)=>s+demandOf(t.n),0);
 
@@ -384,7 +393,7 @@ function Dashboard({coeTable, allocTable, progTable}){
       </div>
 
       <div className="kpis">
-        <div className="kpi"><div className="n">{progInView}</div><div className="l">Submitted programs <small>(of {progTotal} submitted)</small></div></div>
+        <div className="kpi"><div className="n">{progStats.inView}</div><div className="l">Submitted programs <small>(of {progStats.total} all quarters)</small></div></div>
         <div className="kpi"><div className="n">{shown.length}</div><div className="l">Teams shown</div></div>
         <div className="kpi"><div className="n">{fmt(totCap)} <small>hrs</small></div><div className="l">Usable capacity, selected quarter(s)</div></div>
         <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Submitted hours (selected)</div></div>
