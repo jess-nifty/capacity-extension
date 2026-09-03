@@ -12,7 +12,7 @@ const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGd
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
               status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h'};
 const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
-              quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd'};
+              quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN'};
 
 const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','YAds','Fantasy'];
 const WEEKS = 13;
@@ -21,6 +21,12 @@ const WEEKS = 13;
 // the numbers here agree with it. Submitted = everything except Rejected; Accepted is
 // the two approved statuses. Choice names are compared trimmed: "Rejected " carries a
 // trailing space in the base.
+// CoEs that are never real delivery capacity, so they are dropped from the team
+// cards, the totals and the timeline alike. Names are compared trimmed: "Other "
+// carries a trailing space in the base.
+const EXCLUDED_COES = new Set(['Vendor / Agency','Other']);
+const isExcludedCoE = n => !n || EXCLUDED_COES.has(String(n).trim());
+
 const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
 const REJECTED_STATUS = 'Rejected';
 const MAX_BARS = 250;
@@ -106,6 +112,10 @@ loadCSSFromString(`
 
 const fmt = n => (Math.round((n||0)*10)/10).toLocaleString(undefined,{maximumFractionDigits:1});
 const pct = n => (isFinite(n)?Math.round(n*100):0);
+// Utilisation is measured against FULL capacity, so the 30% unplanned reserve is
+// applied once — here, by the 0.70 threshold — and not a second time in the
+// denominator. Red therefore fires exactly when a team has consumed its usable
+// (70%) allowance and starts eating the buffer.
 const band = v => v>0.70?'red':(v>=0.50?'amber':'green');
 const BC = {green:'var(--green)',amber:'var(--amber)',red:'var(--red)'};
 
@@ -198,17 +208,14 @@ function Dropdown({label, options, selected, onToggle, onSetAll}){
   );
 }
 
-// Rebuilds the two timelines from the "Accepted & Submitted Capacity Planning"
-// dashboard: allocations laid out across Est. Work Start -> End Date, switchable
-// between the accepted and submitted status buckets. Reads the same table the rest
-// of the dashboard already loads, so it needs no extra data source.
+// Rebuilds the Submitted view of the "Accepted & Submitted Capacity Planning"
+// page: allocations laid out across Est. Work Start -> End Date, grouped by CoE.
+// Submitted is that page's own bucket — every status except Rejected. The Accepted
+// view is deliberately not reproduced here.
 function Timeline({rows, hasStatus, hasDates}){
-  const [mode, setMode] = useState('accepted');
-
-  const inMode = useMemo(()=>{
-    if(!hasStatus) return rows;
-    return mode==='accepted' ? rows.filter(r=>r.isAccepted) : rows.filter(r=>!r.isRejected);
-  },[rows, mode, hasStatus]);
+  const inMode = useMemo(()=>
+    hasStatus ? rows.filter(r=>!r.isRejected) : rows
+  ,[rows, hasStatus]);
 
   // A bar needs both ends; anything half-dated is counted in the note instead of
   // being drawn at a guessed position.
@@ -252,10 +259,6 @@ function Timeline({rows, hasStatus, hasDates}){
   return (
     <div className="tl">
       <div className="tl-head">
-        {hasStatus && <div className="seg">
-          <button data-on={mode==='accepted'?'1':'0'} onClick={()=>setMode('accepted')}>Accepted</button>
-          <button data-on={mode==='submitted'?'1':'0'} onClick={()=>setMode('submitted')}>Submitted</button>
-        </div>}
         <span className="tl-note">
           {dated.length} allocation{dated.length===1?'':'s'}
           {undated>0 ? ' · '+undated+' hidden (missing a start or end date)' : ''}
@@ -276,7 +279,7 @@ function Timeline({rows, hasStatus, hasDates}){
               <div className="tl-coe">{coe} <i>{items.length}</i></div>
               {items.map(r=>{
                 const left = pos(r.s), w = Math.max(0.6, pos(r.e) - left);
-                const hrs = (mode==='accepted' && r.acc) ? r.acc : r.sub;
+                const hrs = r.sub;
                 return (
                   <div className="tl-row" key={r.id}>
                     <div className="tl-lbl" title={r.pname}>{r.pname}</div>
@@ -353,10 +356,10 @@ function Dashboard({coeTable, allocTable, progTable}){
   const teams = useMemo(()=>{
     if(!coeRecords) return [];
     return coeRecords.map(r=>({
-      n: r.getCellValueAsString(COE.name),
+      n: r.getCellValueAsString(COE.name).trim(),
       wk100: Number(r.getCellValue(COE.wk100))||0,
       wk70: Number(r.getCellValue(COE.wk70))||0,
-    })).filter(t=>t.n && t.n!=='Vendor / Agency');
+    })).filter(t=>t.n && !isExcludedCoE(t.n));
   },[coeRecords]);
 
   const [selT, setSelT] = useState(null);
@@ -371,7 +374,12 @@ function Dashboard({coeTable, allocTable, progTable}){
   const hasYearField = !!progTable.getFieldByIdIfExists(PROG.year);
   // Timeline + status inputs are optional: the dashboard still works without them,
   // so they are feature-detected rather than added to the hard preflight.
-  const hasStatusField = !!allocTable.getFieldByIdIfExists(ALLOC.status);
+  // Status can come from either end. Programs holds the real single-select; the
+  // allocation carries a lookup of it. Either will do, so only warn when neither
+  // is exposed — at that point rejected programs genuinely cannot be identified.
+  const hasProgStatus = !!progTable.getFieldByIdIfExists(PROG.status);
+  const hasAllocStatus = !!allocTable.getFieldByIdIfExists(ALLOC.status);
+  const hasStatusField = hasProgStatus || hasAllocStatus;
   const hasTimelineFields = !!allocTable.getFieldByIdIfExists(ALLOC.start)
                          && !!allocTable.getFieldByIdIfExists(ALLOC.end);
 
@@ -383,16 +391,18 @@ function Dashboard({coeTable, allocTable, progTable}){
       const crit = r.getCellValue(PROG.crit);
       const qSel = hasQuarterField ? r.getCellValue(PROG.quarter) : null;
       const ySel = hasYearField ? r.getCellValue(PROG.year) : null;
+      const stSel = hasProgStatus ? r.getCellValue(PROG.status) : null;
       m.set(r.id, {
         bu: buLink ? buLink.name : 'Unassigned',
         test: r.getCellValue(PROG.test)===true,
         crit: !!(crit && crit.name && crit.name.toUpperCase()==='YES'),
         q: (qSel && qSel.name) ? String(qSel.name).trim() : null,
         y: (ySel && ySel.name) ? String(ySel.name).trim() : null,
+        st: (stSel && stSel.name) ? String(stSel.name).trim() : null,
       });
     });
     return m;
-  },[progRecords, hasQuarterField, hasYearField]);
+  },[progRecords, hasQuarterField, hasYearField, hasProgStatus]);
 
   // allocations → normalized rows
   const rows = useMemo(()=>{
@@ -406,12 +416,14 @@ function Dashboard({coeTable, allocTable, progTable}){
       let q = null, y = null;
       if(pm && pm.q){ q = pm.q; y = pm.y; }
       else if(fromDate){ q = fromDate.q; y = fromDate.y; }
-      const st = hasStatusField ? lookupText(r.getCellValue(ALLOC.status)) : null;
+      // Prefer the program's own status; fall back to the allocation's lookup of it.
+      const st = (pm && pm.st) ? pm.st
+               : (hasAllocStatus ? lookupText(r.getCellValue(ALLOC.status)) : null);
       return {
         id: r.id,
         pid: prog ? prog.id : null,
         pname: prog ? prog.name : '(no program)',
-        coe: coe ? coe.name : null,
+        coe: coe ? String(coe.name).trim() : null,
         sub: Number(r.getCellValue(ALLOC.sub))||0,
         acc: Number(r.getCellValue(ALLOC.acc))||0,
         qk: qKey(q, y),
@@ -426,8 +438,8 @@ function Dashboard({coeTable, allocTable, progTable}){
         s: hasTimelineFields ? parseDate(r.getCellValue(ALLOC.start)) : null,
         e: hasTimelineFields ? parseDate(r.getCellValue(ALLOC.end)) : null,
       };
-    }).filter(x=>x.coe && !x.test && x.coe!=='Vendor / Agency');
-  },[allocRecords, progMap, hasStatusField, hasTimelineFields]);
+    }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
+  },[allocRecords, progMap, hasAllocStatus, hasTimelineFields]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -463,14 +475,20 @@ function Dashboard({coeTable, allocTable, progTable}){
 
   const shown = teams.filter(t=>selTeams.has(t.n));
   const visibleRows = rows.filter(x=>selTeams.has(x.coe) && inQ(x.qk));
+  // Submitted programs, using the same bucket as the hours: everything the
+  // "Accepted & Submitted Capacity Planning" page treats as submitted, i.e. every
+  // status except Rejected. The denominator is the submitted programs across all
+  // quarters and teams, so "x of y" compares like with like as the filters move.
+  const submittedRows = rows.filter(x=>x.pid && !x.isRejected);
+  const progTotal = new Set(submittedRows.map(x=>x.pid)).size;
   const progInView = new Set(
-    rows.filter(x=>x.pid && selTeams.has(x.coe) && inQ(x.qk)).map(x=>x.pid)
+    submittedRows.filter(x=>selTeams.has(x.coe) && inQ(x.qk)).map(x=>x.pid)
   ).size;
   const totCap = shown.reduce((s,t)=>s+t.wk70*WEEKS*nQ,0);
   const totSub = shown.reduce((s,t)=>s+demandOf(t.n),0);
 
   let cards = teams.filter(t=>selTeams.has(t.n));
-  const util = t => (t.wk70>0) ? demandOf(t.n)/(t.wk70*WEEKS*nQ) : (demandOf(t.n)>0?9:0);
+  const util = t => (t.wk100>0) ? demandOf(t.n)/(t.wk100*WEEKS*nQ) : (demandOf(t.n)>0?9:0);
   if(sortMode==='az') cards.sort((a,b)=>a.n.localeCompare(b.n));
   else if(sortMode==='za') cards.sort((a,b)=>b.n.localeCompare(a.n));
   else cards.sort((a,b)=>util(b)-util(a));
@@ -493,11 +511,11 @@ function Dashboard({coeTable, allocTable, progTable}){
         Showing <b>{selQ.size===0 ? 'no quarters' : [...selQ].sort((a,b)=>qSortValue(a)-qSortValue(b)).join(', ')}</b>
         {' · '}<b>{shown.length}</b> of {teams.length} teams
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
-        {!hasStatusField && <span className="warn">{' · '}Program Status isn't exposed — rejected programs are still counted</span>}
+        {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
       </div>
 
       <div className="kpis">
-        <div className="kpi"><div className="n">{progInView}</div><div className="l">Programs in selection <small>(of {progRecords?progRecords.length:'—'})</small></div></div>
+        <div className="kpi"><div className="n">{progInView}</div><div className="l">Submitted programs <small>(of {progTotal} submitted)</small></div></div>
         <div className="kpi"><div className="n">{shown.length}</div><div className="l">Teams shown</div></div>
         <div className="kpi"><div className="n">{fmt(totCap)} <small>hrs</small></div><div className="l">Usable capacity, selected quarter(s)</div></div>
         <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Submitted hours (selected)</div></div>
@@ -520,8 +538,11 @@ function Dashboard({coeTable, allocTable, progTable}){
       <div className="st">Team Capacity (per CoE)</div>
       <div className="grid">
         {cards.map(t=>{
-          const noCap=t.wk70===0, cap=t.wk70*WEEKS*nQ, d=demandOf(t.n);
-          const u = noCap? null : d/cap, bnd = noCap?'grey':band(u);
+          const noCap=t.wk100===0, full=t.wk100*WEEKS*nQ, cap=t.wk70*WEEKS*nQ, d=demandOf(t.n);
+          // Percentage and colour run off full capacity; "remaining" and the
+          // reduction still measure against the 70% allowance, which is the
+          // number a lead actually plans to.
+          const u = noCap? null : d/full, bnd = noCap?'grey':band(u);
           const rem = cap-d, red = d>cap? d-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
           const tagTxt = noCap?'No capacity set':(bnd==='red'?'Over threshold':bnd==='amber'?'Approaching':'Healthy');
@@ -533,7 +554,7 @@ function Dashboard({coeTable, allocTable, progTable}){
                   <div className="ubig" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</div>
                   <span className={'tag '+tagCls}>{tagTxt}</span>
                 </div>
-                <div className="ucap">Submitted hrs ÷ usable capacity (selected quarter{selQ.size>1?'s':''})</div>
+                <div className="ucap">Submitted hrs ÷ full capacity — the marker is the 70% allowance</div>
                 <div className="bar"><i style={{width:Math.min(100,(u||0)*100)+'%',background:noCap?'#ccc':BC[bnd]}}/>{!noCap&&<span className="tgt"/>}</div>
               </div>
               <div className="metrics">
@@ -549,7 +570,7 @@ function Dashboard({coeTable, allocTable, progTable}){
         })}
       </div>
 
-      <div className="st">Delivery Timeline</div>
+      <div className="st">Submitted Capacity Planning</div>
       <Timeline rows={visibleRows} hasStatus={hasStatusField} hasDates={hasTimelineFields}/>
     </div>
   );
