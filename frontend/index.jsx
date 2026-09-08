@@ -24,7 +24,7 @@ const WEEKS = 13;
 // CoEs that are never real delivery capacity, so they are dropped from the team
 // cards, the totals and the timeline alike. Names are compared trimmed: "Other "
 // carries a trailing space in the base.
-const EXCLUDED_COES = new Set(['Vendor / Agency','Other']);
+const EXCLUDED_COES = new Set(['Vendor / Agency','Other','O&O']);
 const isExcludedCoE = n => !n || EXCLUDED_COES.has(String(n).trim());
 
 const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
@@ -48,6 +48,7 @@ loadCSSFromString(`
   .cap .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:0 0 20px; }
   .cap select, .cap button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:9px; padding:7px 11px; color:var(--ink); cursor:pointer; }
   .cap .dd { position:relative; }
+  .cap .dd > button { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cap .panel { position:absolute; z-index:20; top:calc(100% + 4px); left:0; background:#fff; border:1px solid var(--line);
     border-radius:10px; box-shadow:0 8px 24px rgba(40,30,90,.14); padding:8px; min-width:230px; max-height:300px; overflow:auto; }
   .cap .panel label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
@@ -133,11 +134,6 @@ function qSortValue(k){
   if(!m) return Infinity;
   return (m[2] ? parseInt(m[2],10) : 0)*10 + parseInt(m[1],10);
 }
-function currentQKey(){
-  const d = new Date();
-  return qKey('Q'+Math.ceil((d.getMonth()+1)/3), String(d.getFullYear()));
-}
-
 function lookupText(cell){
   if(cell==null) return null;
   if(Array.isArray(cell)){
@@ -152,7 +148,14 @@ function lookupText(cell){
 
 function Dropdown({label, options, selected, onToggle, onSetAll}){
   const [open,setOpen]=useState(false);
-  const lbl = selected.size===options.length ? 'All' : (selected.size===0 ? 'none' : selected.size+' selected');
+  // Name what's actually selected rather than counting it. Falls back to a count
+  // only once the list would be too long to read at a glance — with two quarters
+  // that never happens, so the button always says which ones are in view.
+  const picked = options.filter(o=>selected.has(o));
+  const lbl = picked.length===0 ? 'none'
+            : picked.length<=3 ? picked.join(', ')
+            : picked.length===options.length ? 'All'
+            : picked.length+' selected';
   return (
     <div className="dd" style={{position:'relative'}}>
       <button onClick={()=>setOpen(o=>!o)}>{label}: <b>{lbl}</b></button>
@@ -320,10 +323,10 @@ function Dashboard({coeTable, allocTable, progTable}){
   },[rows, progMap]);
 
   const [selQRaw, setSelQ] = useState(null);
-  const defaultQ = useMemo(()=>{
-    const now = currentQKey();
-    return new Set(quarterOptions.includes(now) ? [now] : quarterOptions);
-  },[quarterOptions]);
+  // Every quarter is selected until someone narrows it. Defaulting to the current
+  // quarter meant the page opened pre-filtered, which read as "there is no data"
+  // whenever the work sat in a different quarter.
+  const defaultQ = useMemo(()=>new Set(quarterOptions),[quarterOptions]);
   const selQ = selQRaw ?? defaultQ;
 
   // Capacity scales with how many real quarters are selected — "No quarter set"
@@ -350,15 +353,14 @@ function Dashboard({coeTable, allocTable, progTable}){
   // reported a handful instead of the real figure. Submitted means every status
   // except Rejected, matching the hours. The Teams filter deliberately does not
   // apply — a program spans several CoEs, so there is no one team it belongs to.
-  const progStats = useMemo(()=>{
-    let inView = 0, total = 0;
+  const progInView = useMemo(()=>{
+    let n = 0;
     progMap.forEach(pm=>{
       if(pm.test) return;
       if(pm.st === REJECTED_STATUS) return;
-      total++;
-      if(inQ(qKey(pm.q, pm.y))) inView++;
+      if(inQ(qKey(pm.q, pm.y))) n++;
     });
-    return {inView, total};
+    return n;
   },[progMap, selQ]);
   const totCap = shown.reduce((s,t)=>s+t.wk70*WEEKS*nQ,0);
   const totSub = shown.reduce((s,t)=>s+demandOf(t.n),0);
@@ -393,7 +395,7 @@ function Dashboard({coeTable, allocTable, progTable}){
       </div>
 
       <div className="kpis">
-        <div className="kpi"><div className="n">{progStats.inView}</div><div className="l">Submitted programs <small>(of {progStats.total} all quarters)</small></div></div>
+        <div className="kpi"><div className="n">{progInView}</div><div className="l">Submitted programs</div></div>
         <div className="kpi"><div className="n">{shown.length}</div><div className="l">Teams shown</div></div>
         <div className="kpi"><div className="n">{fmt(totCap)} <small>hrs</small></div><div className="l">Usable capacity, selected quarter(s)</div></div>
         <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Submitted hours (selected)</div></div>
