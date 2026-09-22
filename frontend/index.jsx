@@ -134,10 +134,26 @@ loadCSSFromString(`
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
   .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
   .cap .ucap { font-size:12px; color:var(--muted); margin-top:2px; }
-  .cap .wkstrip { display:flex; gap:2px; margin:10px 0 2px; }
-  .cap .wkcell { flex:1; height:16px; border-radius:3px; background:var(--muted); }
-  .cap .wkcell.green { background:var(--green); } .cap .wkcell.amber { background:var(--amber); }
-  .cap .wkcell.red { background:var(--red); } .cap .wkcell.grey { background:#ccc; }
+  .cap .wk { margin:12px 0 2px; }
+  .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:56px;
+    border-bottom:1px solid var(--line); }
+  .cap .wk-bars::after { content:''; position:absolute; left:0; right:0; top:var(--thr);
+    border-top:1px dashed var(--ink); opacity:.4; pointer-events:none; }
+  .cap .wk-b { flex:1; display:flex; align-items:flex-end; height:100%; cursor:default; }
+  .cap .wk-b > i { display:block; width:100%; border-radius:3px 3px 0 0; background:var(--muted); }
+  .cap .wk-b > i.green { background:var(--green); } .cap .wk-b > i.amber { background:var(--amber); }
+  .cap .wk-b > i.red { background:var(--red); } .cap .wk-b > i.grey { background:#ccc; }
+  .cap .wk-b.pk > i { outline:2px solid var(--ink); outline-offset:1px; }
+  .cap .wk-ax { display:flex; gap:3px; margin-top:5px; }
+  .cap .wk-ax span { flex:1; font-size:9.5px; color:var(--muted); white-space:nowrap; }
+  .cap .wk-read { font-size:11.5px; color:var(--ink); margin:0 0 6px; min-height:16px; }
+  .cap .wk-read b { font-variant-numeric:tabular-nums; }
+  .cap .wk-wk { display:inline-block; background:var(--purple-soft); color:var(--purple); font-weight:700;
+    border-radius:5px; padding:1px 7px; margin-right:7px; font-size:11px; }
+  .cap .wk-h { color:var(--muted); }
+  .cap .wk-pin { color:var(--purple); font-weight:600; }
+  .cap .wk-b:hover > i { filter:brightness(1.12); }
+  .cap .wk-b.pinned > i { outline:2px solid var(--purple); outline-offset:1px; }
   .cap .bar { height:8px; border-radius:6px; background:#eee; margin:12px 0 4px; overflow:hidden; position:relative; }
   .cap .bar > i { display:block; height:100%; border-radius:6px; }
   .cap .bar .tgt { position:absolute; top:-3px; bottom:-3px; width:2px; background:#3a2f74; opacity:.55; left:70%; }
@@ -228,6 +244,14 @@ function qBounds(k){
 }
 
 const wkLabel = ms => new Date(ms).toLocaleDateString(undefined,{day:'numeric',month:'short',timeZone:'UTC'});
+// "9 – 15 Nov", or "30 Nov – 6 Dec" when the week straddles a month.
+const wkRange = ms => {
+  const a = new Date(ms), b = new Date(ms + 6*86400000);
+  const dayA = a.getUTCDate(), dayB = b.getUTCDate();
+  const monA = a.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'});
+  const monB = b.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'});
+  return monA===monB ? dayA+'–'+dayB+' '+monB : dayA+' '+monA+' – '+dayB+' '+monB;
+};
 
 function qSortValue(k){
   if(k===UNASSIGNED) return Infinity;
@@ -245,6 +269,45 @@ function lookupText(cell){
   }
   if(typeof cell==='object') return (cell.name ?? cell.value ?? null);
   return String(cell).trim();
+}
+
+// One card's weekly load. Hovering reads a week out; clicking pins it as the
+// card's headline figure so it can be compared against other teams.
+function WeekChart({weeks, series, capWk, noCap, activeIdx, pinned, onPick, scale}){
+  const [hov, setHov] = useState(null);
+  const show = hov!=null ? hov : activeIdx;
+  const uu = i => (noCap || !capWk) ? 0 : series[i]/capWk;
+  return (
+    <div className="wk">
+      <div className="wk-read">
+        {show!=null && series.length
+          ? <><span className="wk-wk">{wkRange(weeks[show])}</span>
+              <b>{noCap?'—':pct(uu(show))+'%'}</b>
+              <span className="wk-h"> · {fmt(series[show])} hrs</span>
+              {pinned!=null && hov==null && <span className="wk-pin"> pinned</span>}</>
+          : <span className="wk-h">Hover a week to read it · click to pin</span>}
+      </div>
+      <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%'}}>
+        {series.map((h,i)=>(
+          <span key={weeks[i]}
+            className={'wk-b'+(i===activeIdx?' pk':'')+(i===pinned?' pinned':'')}
+            onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
+            onClick={()=>onPick(i)}
+            title={wkRange(weeks[i])+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')}>
+            <i className={noCap?'grey':band(uu(i))}
+               style={{height: uu(i)>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '0'}}/>
+          </span>
+        ))}
+      </div>
+      <div className="wk-ax">
+        {weeks.map((w,i)=>{
+          const dt = new Date(w);
+          const newMonth = i===0 || new Date(weeks[i-1]).getUTCMonth()!==dt.getUTCMonth();
+          return <span key={w}>{newMonth ? dt.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'}) : ''}</span>;
+        })}
+      </div>
+    </div>
+  );
 }
 
 function Dropdown({label, options, selected, onToggle, onSetAll, onReset}){
@@ -365,6 +428,13 @@ function Dashboard({coeTable, allocTable, progTable}){
   // single header row so a long list of teams stays scannable.
   const [openTeams, setOpenTeams] = useState(()=>new Set());
   const [collapsed, setCollapsed] = useState(()=>new Set());
+  // A week pinned on a card overrides whichever figure the view would otherwise show.
+  const [pinnedWk, setPinnedWk] = useState(()=>new Map());
+  const pickWeek = (team,i) => setPinnedWk(prev=>{
+    const next = new Map(prev);
+    next.get(team)===i ? next.delete(team) : next.set(team,i);
+    return next;
+  });
   // Section-level open/closed, so a long page can be folded down to the part in use.
   const [openSections, setOpenSections] = useState(()=>({bu:true, teams:true, nodate:true}));
   const toggleSection = k => setOpenSections(o=>({...o, [k]:!o[k]}));
@@ -671,7 +741,11 @@ function Dashboard({coeTable, allocTable, progTable}){
           const peakIdx = series.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
           const peakU = (noCap||!series.length) ? null : series[peakIdx]/t.wk100;
           const uQ = noCap? null : d/full;
-          const u = (view==='weekly' && hasDates) ? peakU : uQ;
+          const wkScale = Math.max(1, peakU||0);   // chart tops out at 100%, or at the peak if it exceeds
+          const pinIdx = pinnedWk.get(t.n);
+          const activeIdx = (pinIdx!=null && pinIdx<series.length) ? pinIdx
+                          : ((view==='weekly' && hasDates && series.length) ? peakIdx : null);
+          const u = (activeIdx!=null && !noCap) ? series[activeIdx]/t.wk100 : uQ;
           const bnd = (u==null)?'grey':band(u);
           const rem = cap-d, red = d>cap? d-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
@@ -713,19 +787,16 @@ function Dashboard({coeTable, allocTable, progTable}){
                   <span className={'tag '+tagCls}>{tagTxt}</span>
                 </div>
                 <div className="ucap">
-                  {view==='weekly' && hasDates
-                    ? (series.length ? 'Busiest week — w/c '+wkLabel(selWeeks[peakIdx])+' · quarter average '+(uQ==null?'—':pct(uQ)+'%') : 'No dated work in this selection')
-                    : 'Average across the quarter ÷ full capacity — the marker is the 70% allowance'}
+                  {activeIdx!=null
+                    ? (pinIdx!=null ? 'Week of ' : 'Busiest week — ')+'w/c '+wkLabel(selWeeks[activeIdx])
+                      +' · quarter average '+(uQ==null?'—':pct(uQ)+'%')
+                    : (hasDates && !series.length ? 'No dated work in this selection'
+                       : 'Average across the quarter ÷ full capacity')}
                 </div>
-                {hasDates && series.length>0 && <div className="wkstrip">
-                  {series.map((h,i)=>{
-                    const uu = noCap?0:h/t.wk100;
-                    return <span key={selWeeks[i]} className={'wkcell '+(noCap?'grey':band(uu))}
-                      style={{opacity: 0.22 + Math.min(1,uu)*0.78}}
-                      title={'w/c '+wkLabel(selWeeks[i])+' — '+(noCap?'no capacity':pct(uu)+'%'+' · '+fmt(h)+' hrs')}/>;
-                  })}
-                </div>}
-                <div className="bar"><i style={{width:Math.min(100,(u||0)*100)+'%',background:noCap?'#ccc':BC[bnd]}}/>{!noCap&&<span className="tgt"/>}</div>
+                {hasDates && series.length>0 && <WeekChart
+                  weeks={selWeeks} series={series} capWk={t.wk100} noCap={noCap}
+                  activeIdx={activeIdx} pinned={pinIdx} scale={wkScale}
+                  onPick={i=>pickWeek(t.n,i)}/>}
                 </>}
               </div>
               {!isCol && <div className="metrics">
