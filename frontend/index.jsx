@@ -32,7 +32,8 @@ const isExcludedCoE = n => !n || [...EXCLUDED_COES].some(x=>norm(x)===norm(n));
 // Teams that exist and can be switched on, but are off when the page opens.
 // Matched on a normalised name because several carry trailing spaces in the base.
 const DEFAULT_OFF_COES = ['ASO','APAC Marketing','Brand & Marketing Research',
-                          'Global Business & Experience (Operations)','Marketing Partnerships'];
+                          'Global Business & Experience (Operations)','Marketing Partnerships',
+                          'Integrated B2B Marketing'];
 const isOffByDefault = n => DEFAULT_OFF_COES.some(x=>norm(x)===norm(n));
 
 // Planning always opens on Q4 of the current year; other quarters are one click away.
@@ -63,6 +64,11 @@ loadCSSFromString(`
   .cap h1 { font-size:24px; margin:0 0 14px; letter-spacing:-.5px; }
   .cap .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:0 0 20px; }
   .cap select, .cap button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:9px; padding:7px 11px; color:var(--ink); cursor:pointer; }
+  .cap .btn-pair { display:inline-flex; }
+  .cap .btn-pair button { border-radius:0; }
+  .cap .btn-pair button:first-child { border-radius:9px 0 0 9px; }
+  .cap .btn-pair button:last-child { border-radius:0 9px 9px 0; margin-left:-1px; }
+  .cap .btn-pair button:disabled { opacity:.45; cursor:default; }
   .cap .dd { position:relative; }
   .cap .dd-toggle { display:inline-flex; align-items:center; gap:8px; max-width:440px; font-size:14px;
     padding:10px 14px; border-radius:10px; }
@@ -85,6 +91,9 @@ loadCSSFromString(`
   .cap .kpi .n small { font-size:13px; font-weight:600; color:var(--muted); }
   .cap .kpi .l { font-size:12px; color:var(--muted); margin-top:2px; }
   .cap .st { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--purple); margin:26px 0 12px; }
+  .cap .st-toggle { display:flex; align-items:center; gap:10px; background:transparent; border:none;
+    padding:0; border-radius:0; cursor:pointer; text-align:left; }
+  .cap .st-toggle:hover { color:var(--purple); }
   .cap table { width:100%; border-collapse:separate; border-spacing:0; background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; font-size:13.5px; }
   .cap th, .cap td { padding:11px 14px; text-align:left; border-bottom:1px solid var(--line); }
   .cap th { background:var(--purple-soft); color:#3a2f74; font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
@@ -101,7 +110,10 @@ loadCSSFromString(`
   .cap .thead:hover .tname { color:var(--purple); }
   .cap .thead-r { margin-left:auto; display:inline-flex; align-items:center; gap:9px; }
   .cap .thead-pct { font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.3px; }
-  .cap .tcaret { color:var(--muted); font-size:11px; }
+  .cap .tcaret { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
+    border-radius:50%; background:var(--purple-soft); color:var(--purple); font-size:15px; font-weight:700;
+    line-height:1; flex:none; }
+  .cap .thead:hover .tcaret { background:var(--purple); color:#fff; }
   .cap .team.collapsed .top { padding-bottom:14px; }
   .cap .prow { display:flex; align-items:center; gap:10px; margin:0 0 12px; }
   .cap .pcount { border:1px solid var(--line); background:transparent; border-radius:20px; padding:3px 10px;
@@ -306,6 +318,9 @@ function Dashboard({coeTable, allocTable, progTable}){
   // single header row so a long list of teams stays scannable.
   const [openTeams, setOpenTeams] = useState(()=>new Set());
   const [collapsed, setCollapsed] = useState(()=>new Set());
+  // Section-level open/closed, so a long page can be folded down to the part in use.
+  const [openSections, setOpenSections] = useState(()=>({bu:true, teams:true}));
+  const toggleSection = k => setOpenSections(o=>({...o, [k]:!o[k]}));
   const toggleCollapse = n => setCollapsed(prev=>{
     const next = new Set(prev);
     next.has(n) ? next.delete(n) : next.add(n);
@@ -473,8 +488,12 @@ function Dashboard({coeTable, allocTable, progTable}){
           onSetAll={next=>setSelT(next)} onReset={()=>setSelT(null)}/>
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
-        <button onClick={()=>setCollapsed(c=>c.size ? new Set() : new Set(cards.map(t=>t.n)))}>
-          {collapsed.size ? 'Expand all' : 'Collapse all'}</button>
+        <div className="btn-pair">
+          <button onClick={()=>setCollapsed(new Set(cards.map(t=>t.n)))}
+            disabled={cards.length>0 && cards.every(t=>collapsed.has(t.n))}>Collapse all</button>
+          <button onClick={()=>setCollapsed(new Set())}
+            disabled={collapsed.size===0}>Expand all</button>
+        </div>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
           Accepted &amp; Submitted Capacity Planning ↗</a>
       </div>
@@ -493,8 +512,11 @@ function Dashboard({coeTable, allocTable, progTable}){
         <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Submitted hours (selected)</div></div>
       </div>
 
-      <div className="st">Business Units</div>
-      <table>
+      <button className="st st-toggle" onClick={()=>toggleSection('bu')}
+        title={openSections.bu?'Collapse Business Units':'Expand Business Units'}>
+        Business Units <span className="tcaret">{openSections.bu?'▾':'▸'}</span>
+      </button>
+      {openSections.bu && <table>
         <thead><tr><th>Business Unit</th><th className="num">Submitted hrs</th><th className="num">Accepted hrs</th><th className="num">Business-critical hrs</th></tr></thead>
         <tbody>
           {BU_ORDER.map(b=>(
@@ -505,10 +527,13 @@ function Dashboard({coeTable, allocTable, progTable}){
           ))}
           <tr className="total"><td>Total</td><td className="num">{fmt(tot.sub)}</td><td className="num">{fmt(tot.acc)}</td><td className="num">{fmt(tot.crit)}</td></tr>
         </tbody>
-      </table>
+      </table>}
 
-      <div className="st">Team Capacity (per CoE)</div>
-      <div className="grid">
+      <button className="st st-toggle" onClick={()=>toggleSection('teams')}
+        title={openSections.teams?'Collapse Team Capacity':'Expand Team Capacity'}>
+        Team Capacity (per CoE) <span className="tcaret">{openSections.teams?'▾':'▸'}</span>
+      </button>
+      {openSections.teams && <div className="grid">
         {cards.map(t=>{
           const noCap=t.wk100===0, full=t.wk100*WEEKS*nQ, cap=t.wk70*WEEKS*nQ, d=demandOf(t.n);
           // Percentage and colour run off full capacity; "remaining" and the
@@ -569,7 +594,7 @@ function Dashboard({coeTable, allocTable, progTable}){
             </div>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 }
