@@ -8,7 +8,8 @@ import React, {useState, useMemo} from 'react';
 */
 
 // ---- Field IDs (stable) ----
-const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGdC0wZqfDuiy', wk70:'fldvuSkFOY4yp6dUs'};
+const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGdC0wZqfDuiy', wk70:'fldvuSkFOY4yp6dUs',
+             people:'fldUFFAf7b0AtmeJl'};
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
               status:'fld02CmuABiOFdxn9'};
 const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
@@ -25,7 +26,22 @@ const WEEKS = 13;
 // cards, the totals and the timeline alike. Names are compared trimmed: "Other "
 // carries a trailing space in the base.
 const EXCLUDED_COES = new Set(['Vendor / Agency','Other','O&O']);
-const isExcludedCoE = n => !n || EXCLUDED_COES.has(String(n).trim());
+const norm = n => String(n||'').trim().toLowerCase().replace(/\s+/g,' ');
+const isExcludedCoE = n => !n || [...EXCLUDED_COES].some(x=>norm(x)===norm(n));
+
+// Teams that exist and can be switched on, but are off when the page opens.
+// Matched on a normalised name because several carry trailing spaces in the base.
+const DEFAULT_OFF_COES = ['ASO','APAC Marketing','Brand & Marketing Research',
+                          'Global Business & Experience (Operations)','Marketing Partnerships'];
+const isOffByDefault = n => DEFAULT_OFF_COES.some(x=>norm(x)===norm(n));
+
+// Planning always opens on Q4 of the current year; other quarters are one click away.
+const PLANNING_QUARTER = 'Q4';
+
+// Admin > People. The base's own formula fields link as /{base}/{pageId}/{recordId},
+// so a person's row opens directly rather than landing on an unfiltered list.
+const PEOPLE_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/paggbWfwyVaiQu6LH';
+const personUrl = id => PEOPLE_PAGE + '/' + id;
 
 const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
 const REJECTED_STATUS = 'Rejected';
@@ -48,10 +64,17 @@ loadCSSFromString(`
   .cap .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:0 0 20px; }
   .cap select, .cap button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:9px; padding:7px 11px; color:var(--ink); cursor:pointer; }
   .cap .dd { position:relative; }
-  .cap .dd > button { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .dd-toggle { display:inline-flex; align-items:center; gap:8px; max-width:440px; font-size:14px;
+    padding:10px 14px; border-radius:10px; }
+  .cap .dd-toggle b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .dd-lab { color:var(--muted); font-size:12.5px; }
+  .cap .dd-caret { color:var(--muted); font-size:11px; margin-left:auto; }
+  .cap .panel-search { width:100%; font:inherit; font-size:13.5px; padding:8px 10px; margin:0 0 8px;
+    border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+  .cap .panel-empty { padding:10px 8px; font-size:12.5px; color:var(--muted); }
   .cap .panel { position:absolute; z-index:20; top:calc(100% + 4px); left:0; background:#fff; border:1px solid var(--line);
-    border-radius:10px; box-shadow:0 8px 24px rgba(40,30,90,.14); padding:8px; min-width:230px; max-height:300px; overflow:auto; }
-  .cap .panel label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
+    border-radius:12px; box-shadow:0 10px 30px rgba(40,30,90,.16); padding:10px; min-width:310px; max-height:420px; overflow:auto; }
+  .cap .panel label { display:flex; align-items:center; gap:9px; padding:8px 9px; border-radius:7px; font-size:13.5px; cursor:pointer; }
   .cap .panel label:hover { background:var(--purple-soft); }
   .cap .panel-actions { display:flex; gap:6px; padding:2px 2px 8px; margin-bottom:6px; border-bottom:1px solid var(--line); }
   .cap .panel-actions button { flex:1; padding:5px 8px; font-size:12px; border-radius:7px; }
@@ -68,10 +91,30 @@ loadCSSFromString(`
   .cap td.num, .cap th.num { text-align:right; font-variant-numeric:tabular-nums; }
   .cap tr:last-child td { border-bottom:none; }
   .cap tr.total td { background:#faf9ff; font-weight:700; }
-  .cap .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .cap .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start; }
   .cap .team { background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden; }
   .cap .team .top { padding:14px 16px 12px; }
-  .cap .tname { font-size:15px; font-weight:700; margin:0 0 12px; min-height:20px; }
+  .cap .tname { font-size:15px; font-weight:700; margin:0 0 6px; min-height:20px; }
+  .cap .thead { width:100%; display:flex; align-items:center; gap:10px; background:transparent; border:none;
+    padding:0; margin:0 0 6px; text-align:left; cursor:pointer; border-radius:0; }
+  .cap .thead .tname { margin:0; min-height:0; }
+  .cap .thead:hover .tname { color:var(--purple); }
+  .cap .thead-r { margin-left:auto; display:inline-flex; align-items:center; gap:9px; }
+  .cap .thead-pct { font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.3px; }
+  .cap .tcaret { color:var(--muted); font-size:11px; }
+  .cap .team.collapsed .top { padding-bottom:14px; }
+  .cap .prow { display:flex; align-items:center; gap:10px; margin:0 0 12px; }
+  .cap .pcount { border:1px solid var(--line); background:transparent; border-radius:20px; padding:3px 10px;
+    font-size:11.5px; font-weight:600; color:var(--muted); display:inline-flex; align-items:center; gap:5px; }
+  .cap .pcount:hover { background:var(--purple-soft); color:var(--purple); }
+  .cap .pgo { font-size:11.5px; color:var(--purple); text-decoration:none; font-weight:600; }
+  .cap .pgo:hover { text-decoration:underline; }
+  .cap .plist { list-style:none; margin:0 0 12px; padding:8px 10px; background:var(--bg); border:1px solid var(--line);
+    border-radius:10px; display:grid; gap:2px; max-height:190px; overflow:auto; }
+  .cap .plist li { font-size:12.5px; }
+  .cap .plist a { color:var(--ink); text-decoration:none; display:block; padding:3px 5px; border-radius:5px; }
+  .cap .plist a:hover { background:var(--purple-soft); color:var(--purple); }
+  .cap .pnone { font-size:12px; color:var(--muted); margin:0 0 12px; }
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
   .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
   .cap .ucap { font-size:12px; color:var(--muted); margin-top:2px; }
@@ -146,36 +189,49 @@ function lookupText(cell){
   return String(cell).trim();
 }
 
-function Dropdown({label, options, selected, onToggle, onSetAll}){
+function Dropdown({label, options, selected, onToggle, onSetAll, onReset}){
   const [open,setOpen]=useState(false);
+  const [q,setQ]=useState('');
   // Name what's actually selected rather than counting it. Falls back to a count
-  // only once the list would be too long to read at a glance — with two quarters
-  // that never happens, so the button always says which ones are in view.
+  // only once the list would be too long to read at a glance.
   const picked = options.filter(o=>selected.has(o));
   const lbl = picked.length===0 ? 'none'
-            : picked.length<=3 ? picked.join(', ')
             : picked.length===options.length ? 'All'
-            : picked.length+' selected';
+            : picked.length<=2 ? picked.join(', ')
+            : picked.length+' of '+options.length;
+  const needle = q.trim().toLowerCase();
+  const visible = needle ? options.filter(o=>o.toLowerCase().includes(needle)) : options;
+  const close = ()=>{ setOpen(false); setQ(''); };
   return (
-    <div className="dd" style={{position:'relative'}}>
-      <button onClick={()=>setOpen(o=>!o)}>{label}: <b>{lbl}</b></button>
+    <div className="dd">
+      <button className="dd-toggle" onClick={()=>setOpen(o=>!o)}>
+        <span className="dd-lab">{label}</span><b>{lbl}</b><span className="dd-caret">▾</span>
+      </button>
       {open && <>
-        <div style={{position:'fixed',inset:0,zIndex:10}} onClick={()=>setOpen(false)}/>
+        <div style={{position:'fixed',inset:0,zIndex:10}} onClick={close}/>
         <div className="panel">
+          <input className="panel-search" autoFocus value={q}
+            placeholder={'Search '+label.toLowerCase()+'…'}
+            onChange={e=>setQ(e.target.value)}/>
+          {/* Never disabled: a greyed-out Clear reads as a broken button. */}
           <div className="panel-actions">
-            <button type="button" disabled={selected.size===options.length}
-              onClick={()=>onSetAll(new Set(options))}>Select all</button>
-            <button type="button" disabled={selected.size===0}
-              onClick={()=>onSetAll(new Set())}>Clear</button>
+            <button type="button" onClick={()=>onSetAll(new Set(options))}>Select all</button>
+            <button type="button" onClick={()=>onSetAll(new Set())}>Clear</button>
+            {onReset && <button type="button" onClick={onReset}>Reset</button>}
           </div>
-          {options.map(o=>(
-            <label key={o}><input type="checkbox" checked={selected.has(o)} onChange={()=>onToggle(o)}/> {o}</label>
-          ))}
+          {visible.length===0
+            ? <div className="panel-empty">No matches for “{q.trim()}”</div>
+            : visible.map(o=>(
+                <label key={o}>
+                  <input type="checkbox" checked={selected.has(o)} onChange={()=>onToggle(o)}/> {o}
+                </label>
+              ))}
         </div>
       </>}
     </div>
   );
 }
+
 
 function App(){
   const base = useBase();
@@ -228,18 +284,45 @@ function Dashboard({coeTable, allocTable, progTable}){
 
   const [sortMode, setSortMode] = useState('az');
 
+  // Capacity is a roll-up of the team's people, so the headcount behind a number is
+  // part of reading it. Names come off the link field itself — People does not need
+  // to be added as a separate data source.
+  const hasPeople = !!coeTable.getFieldByIdIfExists(COE.people);
+
   const teams = useMemo(()=>{
     if(!coeRecords) return [];
     return coeRecords.map(r=>({
       n: r.getCellValueAsString(COE.name).trim(),
       wk100: Number(r.getCellValue(COE.wk100))||0,
       wk70: Number(r.getCellValue(COE.wk70))||0,
+      people: hasPeople
+        ? (r.getCellValue(COE.people)||[]).map(x=>({id:x.id, name:x.name}))
+            .sort((a,b)=>String(a.name).localeCompare(String(b.name)))
+        : null,
     })).filter(t=>t.n && !isExcludedCoE(t.n));
-  },[coeRecords]);
+  },[coeRecords, hasPeople]);
+
+  // Which team cards have their people list open, and which are collapsed to a
+  // single header row so a long list of teams stays scannable.
+  const [openTeams, setOpenTeams] = useState(()=>new Set());
+  const [collapsed, setCollapsed] = useState(()=>new Set());
+  const toggleCollapse = n => setCollapsed(prev=>{
+    const next = new Set(prev);
+    next.has(n) ? next.delete(n) : next.add(n);
+    return next;
+  });
+  const toggleTeam = n => setOpenTeams(prev=>{
+    const next = new Set(prev);
+    next.has(n) ? next.delete(n) : next.add(n);
+    return next;
+  });
 
   const [selT, setSelT] = useState(null);
   const teamNames = useMemo(()=>teams.map(t=>t.n).sort(),[teams]);
-  const selTeams = selT ?? new Set(teamNames);
+  // Everything except the teams that are off by default; null means "untouched",
+  // so Reset drops back to this rather than to all-selected.
+  const defaultTeams = useMemo(()=>new Set(teamNames.filter(n=>!isOffByDefault(n))),[teamNames]);
+  const selTeams = selT ?? defaultTeams;
 
   // Programs carries the quarter people actually set (a single-select), and it is
   // populated far more reliably than In Market Start Date — most programs have no
@@ -323,10 +406,17 @@ function Dashboard({coeTable, allocTable, progTable}){
   },[rows, progMap]);
 
   const [selQRaw, setSelQ] = useState(null);
-  // Every quarter is selected until someone narrows it. Defaulting to the current
-  // quarter meant the page opened pre-filtered, which read as "there is no data"
-  // whenever the work sat in a different quarter.
-  const defaultQ = useMemo(()=>new Set(quarterOptions),[quarterOptions]);
+  // Open on the quarter being planned, with every other quarter one click away in
+  // the dropdown. Falls back to showing everything when that quarter has no work
+  // in it, so the page can never open on an empty selection.
+  const defaultQ = useMemo(()=>{
+    const q4 = qKey(PLANNING_QUARTER, String(new Date().getFullYear()));
+    if(quarterOptions.includes(q4)) return new Set([q4]);
+    // No Q4 for this year in the data — fall back to any Q4, else everything, so
+    // the page never opens on an empty selection.
+    const anyQ4 = quarterOptions.filter(k=>k.startsWith(PLANNING_QUARTER+' '));
+    return new Set(anyQ4.length ? [anyQ4[anyQ4.length-1]] : quarterOptions);
+  },[quarterOptions]);
   const selQ = selQRaw ?? defaultQ;
 
   // Capacity scales with how many real quarters are selected — "No quarter set"
@@ -376,13 +466,15 @@ function Dashboard({coeTable, allocTable, progTable}){
       <h1>Capacity Overview</h1>
       <div className="controls">
         <Dropdown label="Quarters" options={quarterOptions} selected={selQ}
-          onToggle={q=>setSelQ(s=>{const n=new Set(s); n.has(q)?n.delete(q):n.add(q); return n;})}
-          onSetAll={next=>setSelQ(next)}/>
+          onToggle={q=>setSelQ(()=>{const n=new Set(selQ); n.has(q)?n.delete(q):n.add(q); return n;})}
+          onSetAll={next=>setSelQ(next)} onReset={()=>setSelQ(null)}/>
         <Dropdown label="Teams" options={teamNames} selected={selTeams}
           onToggle={t=>setSelT(()=>{const n=new Set(selTeams); n.has(t)?n.delete(t):n.add(t); return n;})}
-          onSetAll={next=>setSelT(next)}/>
+          onSetAll={next=>setSelT(next)} onReset={()=>setSelT(null)}/>
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
+        <button onClick={()=>setCollapsed(c=>c.size ? new Set() : new Set(cards.map(t=>t.n)))}>
+          {collapsed.size ? 'Expand all' : 'Collapse all'}</button>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
           Accepted &amp; Submitted Capacity Planning ↗</a>
       </div>
@@ -426,25 +518,54 @@ function Dashboard({coeTable, allocTable, progTable}){
           const rem = cap-d, red = d>cap? d-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
           const tagTxt = noCap?'No capacity set':(bnd==='red'?'Over threshold':bnd==='amber'?'Approaching':'Healthy');
+          const isCol = collapsed.has(t.n);
           return (
-            <div className="team" key={t.n}>
+            <div className={'team'+(isCol?' collapsed':'')} key={t.n}>
               <div className="top">
-                <div className="tname">{t.n}</div>
+                <button className="thead" onClick={()=>toggleCollapse(t.n)}
+                  title={isCol?'Expand this team':'Collapse this team'}>
+                  <span className="tname">{t.n}</span>
+                  <span className="thead-r">
+                    <span className="thead-pct" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</span>
+                    <span className="tcaret">{isCol?'▸':'▾'}</span>
+                  </span>
+                </button>
+                {!isCol && <>
+                {t.people && <div className="prow">
+                  <button className="pcount" onClick={()=>toggleTeam(t.n)}
+                    title={t.people.length ? 'Show the people in this team' : 'No one is linked to this team'}>
+                    {t.people.length} {t.people.length===1?'person':'people'}
+                    <span>{openTeams.has(t.n)?'▾':'▸'}</span>
+                  </button>
+                  <a className="pgo" href={PEOPLE_PAGE} target="_blank" rel="noopener noreferrer">People ↗</a>
+                </div>}
+                {t.people && openTeams.has(t.n) && (
+                  t.people.length
+                    ? <ul className="plist">
+                        {t.people.map(pp=>(
+                          <li key={pp.id}>
+                            <a href={personUrl(pp.id)} target="_blank" rel="noopener noreferrer">{pp.name}</a>
+                          </li>
+                        ))}
+                      </ul>
+                    : <div className="pnone">No people linked — that is why capacity is 0.</div>
+                )}
                 <div className="urow">
                   <div className="ubig" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</div>
                   <span className={'tag '+tagCls}>{tagTxt}</span>
                 </div>
                 <div className="ucap">Submitted hrs ÷ full capacity — the marker is the 70% allowance</div>
                 <div className="bar"><i style={{width:Math.min(100,(u||0)*100)+'%',background:noCap?'#ccc':BC[bnd]}}/>{!noCap&&<span className="tgt"/>}</div>
+                </>}
               </div>
-              <div className="metrics">
+              {!isCol && <div className="metrics">
                 <div><div className="k">Working hrs / quarter (100%)</div><div className="v">{fmt(t.wk100*WEEKS*nQ)}</div></div>
                 <div><div className="k">Usable / quarter (70%)</div><div className="v">{fmt(cap)} <small>hrs</small></div></div>
                 <div><div className="k">Submitted hrs</div><div className="v">{fmt(d)}</div></div>
                 <div><div className="k">Hrs remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
                 <div><div className="k">Reduction to hit 70%</div><div className="v" style={{color:red>0?'var(--red)':'var(--green)'}}>{red>0?fmt(red)+' hrs':'None'}</div></div>
                 <div><div className="k">Working hrs / week</div><div className="v">{fmt(t.wk100)} <small>/ 70%: {fmt(t.wk70)}</small></div></div>
-              </div>
+              </div>}
             </div>
           );
         })}
