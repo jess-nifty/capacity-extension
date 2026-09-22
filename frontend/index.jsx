@@ -11,7 +11,7 @@ import React, {useState, useMemo} from 'react';
 const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGdC0wZqfDuiy', wk70:'fldvuSkFOY4yp6dUs',
              people:'fldUFFAf7b0AtmeJl'};
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
-              status:'fld02CmuABiOFdxn9'};
+              status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h'};
 const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
               quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN'};
 
@@ -183,6 +183,36 @@ function lookupDate(cell){
 // The key the filter matches on: 'Q4 2026' when the year is known, 'Q4' when it
 // isn't. Bucketing on a bare 'Q4' merged Q4 2026 with any other year's Q4.
 function qKey(q, y){ return q ? (y ? q+' '+y : q) : UNASSIGNED; }
+// Demand is placed by when the work is actually scheduled, not by the quarter its
+// programme is tagged to. The two disagree badly: programmes tagged Q4 routinely
+// have work running in Q3, or in Q1 of the following year. Hours are spread evenly
+// across the Mondays between Est. Work Start and End — the same method the native
+// capacity page uses — and only the weeks landing inside the selection are counted.
+const MONDAY_MS = 7*86400000;
+function parseDate(v){
+  if(!v) return null;
+  const t = String(v);
+  const ms = Date.parse(t.length<=10 ? t+'T00:00:00Z' : t);
+  return isFinite(ms) ? ms : null;
+}
+function mondayOf(ms){
+  const d = new Date(ms);
+  const back = (d.getUTCDay()+6)%7;           // Monday = 0
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()-back);
+}
+function weeksBetween(s, e){
+  const out = [];
+  for(let w = mondayOf(s); w <= e && out.length < 520; w += MONDAY_MS) out.push(w);
+  return out;
+}
+// "Q4 2026" -> the first and last instant of that quarter.
+function qBounds(k){
+  const m = /^Q([1-4]) (\d{4})$/.exec(k);
+  if(!m) return null;
+  const q = +m[1], y = +m[2];
+  return [Date.UTC(y,(q-1)*3,1), Date.UTC(y,q*3,0)];
+}
+
 function qSortValue(k){
   if(k===UNASSIGNED) return Infinity;
   const m = /^Q([1-4])(?: (\d{4}))?$/.exec(k);
@@ -319,7 +349,7 @@ function Dashboard({coeTable, allocTable, progTable}){
   const [openTeams, setOpenTeams] = useState(()=>new Set());
   const [collapsed, setCollapsed] = useState(()=>new Set());
   // Section-level open/closed, so a long page can be folded down to the part in use.
-  const [openSections, setOpenSections] = useState(()=>({bu:true, teams:true}));
+  const [openSections, setOpenSections] = useState(()=>({bu:true, teams:true, excl:true}));
   const toggleSection = k => setOpenSections(o=>({...o, [k]:!o[k]}));
   const toggleCollapse = n => setCollapsed(prev=>{
     const next = new Set(prev);
@@ -350,6 +380,8 @@ function Dashboard({coeTable, allocTable, progTable}){
   // Status can come from either end. Programs holds the real single-select; the
   // allocation carries a lookup of it. Either will do, so only warn when neither
   // is exposed — at that point rejected programs genuinely cannot be identified.
+  const hasDates = !!allocTable.getFieldByIdIfExists(ALLOC.start)
+                && !!allocTable.getFieldByIdIfExists(ALLOC.end);
   const hasProgStatus = !!progTable.getFieldByIdIfExists(PROG.status);
   const hasAllocStatus = !!allocTable.getFieldByIdIfExists(ALLOC.status);
   const hasStatusField = hasProgStatus || hasAllocStatus;
@@ -406,9 +438,11 @@ function Dashboard({coeTable, allocTable, progTable}){
         // previous unfiltered behaviour rather than silently dropping to zero.
         isAccepted: st ? ACCEPTED_STATUSES.has(st) : false,
         isRejected: st ? st === REJECTED_STATUS : false,
+        s: hasDates ? parseDate(r.getCellValue(ALLOC.start)) : null,
+        e: hasDates ? parseDate(r.getCellValue(ALLOC.end)) : null,
       };
     }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
-  },[allocRecords, progMap, hasAllocStatus]);
+  },[allocRecords, progMap, hasAllocStatus, hasDates]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -438,17 +472,51 @@ function Dashboard({coeTable, allocTable, progTable}){
   // is not a quarter and must not multiply anyone's capacity.
   const nQ = Math.max([...selQ].filter(k=>k!==UNASSIGNED).length,1);
   const inQ = k => selQ.has(k);
-  const demandOf = name => rows.reduce((s,x)=>s+((x.coe===name && inQ(x.qk) && !x.isRejected)?x.sub:0),0);
+  // Bounds of every selected quarter, so a week can be tested against the selection.
+  const selBounds = useMemo(()=>[...selQ].map(qBounds).filter(Boolean),[selQ]);
+
+  // Hours from one allocation that land inside the selection. null = undateable.
+  const hoursInSel = x => {
+    if(!hasDates) return inQ(x.qk) ? x.sub : 0;     // no dates exposed: fall back to the tag
+    if(x.s==null || x.e==null || x.e < x.s) return null;
+    const weeks = weeksBetween(x.s, x.e);
+    if(!weeks.length) return 0;
+    const per = x.sub/weeks.length;
+    let hit = 0;
+    weeks.forEach(w=>{ if(selBounds.some(([a,b])=>w>=a && w<=b)) hit += per; });
+    return hit;
+  };
+
+  const demandOf = name => rows.reduce((s,x)=>{
+    if(x.coe!==name || x.isRejected) return s;
+    return s + (hoursInSel(x) || 0);
+  },0);
+
+  // What the figures above leave out, and why — surfaced rather than silently dropped.
+  const excluded = useMemo(()=>{
+    const m = new Map();
+    rows.forEach(x=>{
+      if(x.isRejected || !selTeams.has(x.coe)) return;
+      const h = hoursInSel(x);
+      const e = m.get(x.coe) || {counted:0, undated:0, outside:0};
+      if(h===null) e.undated += x.sub;
+      else { e.counted += h; e.outside += Math.max(0, x.sub - h); }
+      m.set(x.coe, e);
+    });
+    return [...m.entries()].filter(([,v])=>v.undated>0 || v.outside>0)
+      .sort((a,b)=>(b[1].undated+b[1].outside)-(a[1].undated+a[1].outside));
+  },[rows, selTeams, selBounds, hasDates]);
 
   // BU table (respects team + quarter filters)
   const buAgg = {}; BU_ORDER.forEach(b=>buAgg[b]={sub:0,acc:0,crit:0});
   rows.forEach(x=>{
-    if(!selTeams.has(x.coe) || !inQ(x.qk)) return;
+    if(!selTeams.has(x.coe)) return;
     if(!buAgg[x.bu]) return; // Unassigned & others not shown
     if(x.isRejected) return;                       // Submitted = everything but Rejected
-    buAgg[x.bu].sub += x.sub;
+    const h = hoursInSel(x) || 0;                  // placed by date, like the cards
+    buAgg[x.bu].sub += h;
     if(!hasStatusField || x.isAccepted) buAgg[x.bu].acc += x.acc;
-    if(x.crit) buAgg[x.bu].crit += x.sub;
+    if(x.crit) buAgg[x.bu].crit += h;
   });
   const tot = {sub:0,acc:0,crit:0}; BU_ORDER.forEach(b=>{tot.sub+=buAgg[b].sub;tot.acc+=buAgg[b].acc;tot.crit+=buAgg[b].crit;});
 
@@ -503,6 +571,7 @@ function Dashboard({coeTable, allocTable, progTable}){
         {' · '}<b>{shown.length}</b> of {teams.length} teams
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
+        {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
       </div>
 
       <div className="kpis">
@@ -595,6 +664,36 @@ function Dashboard({coeTable, allocTable, progTable}){
           );
         })}
       </div>}
+
+      {hasDates && excluded.length>0 && <>
+        <button className="st st-toggle" onClick={()=>toggleSection('excl')}
+          title={openSections.excl?'Collapse':'Expand'}>
+          Not counted — by date <span className="tcaret">{openSections.excl?'▾':'▸'}</span>
+        </button>
+        {openSections.excl && <>
+          <div className="ctx">
+            Hours are placed by <b>Est. Work Start / End Date</b>, not by the quarter a programme
+            is tagged to. These are the hours that fall outside the selected quarter{selQ.size>1?'s':''},
+            or that cannot be placed at all because no dates are set.
+          </div>
+          <table>
+            <thead><tr><th>Team</th><th className="num">Counted in selection</th>
+              <th className="num">Scheduled outside</th><th className="num">No work dates</th></tr></thead>
+            <tbody>
+              {excluded.map(([coe,v])=>(
+                <tr key={coe}><td><b>{coe}</b></td>
+                  <td className="num">{fmt(v.counted)}</td>
+                  <td className="num">{fmt(v.outside)}</td>
+                  <td className="num" style={{color:v.undated>0?'var(--amber)':'inherit'}}>{fmt(v.undated)}</td></tr>
+              ))}
+              <tr className="total"><td>Total</td>
+                <td className="num">{fmt(excluded.reduce((a,[,v])=>a+v.counted,0))}</td>
+                <td className="num">{fmt(excluded.reduce((a,[,v])=>a+v.outside,0))}</td>
+                <td className="num">{fmt(excluded.reduce((a,[,v])=>a+v.undated,0))}</td></tr>
+            </tbody>
+          </table>
+        </>}
+      </>}
     </div>
   );
 }
