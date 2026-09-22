@@ -68,11 +68,6 @@ loadCSSFromString(`
   .cap h1 { font-size:24px; margin:0 0 14px; letter-spacing:-.5px; }
   .cap .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:0 0 20px; }
   .cap select, .cap button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:9px; padding:7px 11px; color:var(--ink); cursor:pointer; }
-  .cap .btn-pair { display:inline-flex; }
-  .cap .btn-pair button { border-radius:0; }
-  .cap .btn-pair button:first-child { border-radius:9px 0 0 9px; }
-  .cap .btn-pair button:last-child { border-radius:0 9px 9px 0; margin-left:-1px; }
-  .cap .btn-pair button:disabled { opacity:.45; cursor:default; }
   .cap .dd { position:relative; }
   .cap .dd-toggle { display:inline-flex; align-items:center; gap:8px; max-width:440px; font-size:14px;
     padding:10px 14px; border-radius:10px; }
@@ -119,7 +114,9 @@ loadCSSFromString(`
     line-height:1; flex:none; }
   .cap .thead:hover .tcaret { background:var(--purple); color:#fff; }
   .cap .team.collapsed .top { padding-bottom:14px; }
-  .cap .prow { display:flex; align-items:center; gap:10px; margin:0 0 12px; }
+  .cap .pfoot { padding:11px 14px 13px; border-top:1px solid var(--line); background:#fbfaff; }
+  .cap .prow { display:flex; align-items:center; gap:10px; }
+  .cap .pfoot .plist { margin:9px 0 0; }
   .cap .pcount { border:1px solid var(--line); background:transparent; border-radius:20px; padding:3px 10px;
     font-size:11.5px; font-weight:600; color:var(--muted); display:inline-flex; align-items:center; gap:5px; }
   .cap .pcount:hover { background:var(--purple-soft); color:var(--purple); }
@@ -134,19 +131,23 @@ loadCSSFromString(`
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
   .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
   .cap .ucap { font-size:12px; color:var(--muted); margin-top:2px; }
-  .cap .wk { margin:12px 0 2px; }
-  .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:56px;
+  .cap .wk { margin:18px 0 2px; }
+  .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:62px;
     border-bottom:1px solid var(--line); }
+  .cap .wk-thr { position:absolute; right:0; top:var(--thr); transform:translateY(-50%); font-size:9px;
+    font-weight:700; color:var(--muted); background:var(--card); padding:0 3px; border-radius:3px;
+    pointer-events:none; z-index:2; }
   .cap .wk-bars::after { content:''; position:absolute; left:0; right:0; top:var(--thr);
     border-top:1px dashed var(--ink); opacity:.4; pointer-events:none; }
   .cap .wk-b { flex:1; display:flex; align-items:flex-end; height:100%; cursor:default; }
   .cap .wk-b > i { display:block; width:100%; border-radius:3px 3px 0 0; background:var(--muted); }
   .cap .wk-b > i.green { background:var(--green); } .cap .wk-b > i.amber { background:var(--amber); }
   .cap .wk-b > i.red { background:var(--red); } .cap .wk-b > i.grey { background:#ccc; }
-  .cap .wk-b.pk > i { outline:2px solid var(--ink); outline-offset:1px; }
+  .cap .wk-b > i.zero { background:var(--line); }
+
   .cap .wk-ax { display:flex; gap:3px; margin-top:5px; }
   .cap .wk-ax span { flex:1; font-size:9.5px; color:var(--muted); white-space:nowrap; }
-  .cap .wk-read { font-size:11.5px; color:var(--ink); margin:0 0 6px; min-height:16px; }
+  .cap .wk-read { font-size:11.5px; color:var(--ink); margin:7px 0 0; min-height:17px; }
   .cap .wk-read b { font-variant-numeric:tabular-nums; }
   .cap .wk-wk { display:inline-block; background:var(--purple-soft); color:var(--purple); font-weight:700;
     border-radius:5px; padding:1px 7px; margin-right:7px; font-size:11px; }
@@ -177,7 +178,7 @@ loadCSSFromString(`
   .cap .chip b { color:var(--ink); font-variant-numeric:tabular-nums; }
   .cap a.plain { color:var(--purple); text-decoration:none; font-weight:600; }
   .cap a.plain:hover { text-decoration:underline; }
-  @media (prefers-color-scheme: dark){ .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
+  @media (prefers-color-scheme: dark){ .cap .pfoot { background:#211d33; } .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
   @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:repeat(2,1fr);} }
   @media(max-width:640px){ .cap .grid{grid-template-columns:1fr;} }
 `);
@@ -273,29 +274,22 @@ function lookupText(cell){
 
 // One card's weekly load. Hovering reads a week out; clicking pins it as the
 // card's headline figure so it can be compared against other teams.
-function WeekChart({weeks, series, capWk, noCap, activeIdx, pinned, onPick, scale}){
+function WeekChart({weeks, series, capWk, noCap, pinned, onPick, scale}){
   const [hov, setHov] = useState(null);
-  const show = hov!=null ? hov : activeIdx;
+  const show = hov!=null ? hov : pinned;
   const uu = i => (noCap || !capWk) ? 0 : series[i]/capWk;
   return (
     <div className="wk">
-      <div className="wk-read">
-        {show!=null && series.length
-          ? <><span className="wk-wk">{wkRange(weeks[show])}</span>
-              <b>{noCap?'—':pct(uu(show))+'%'}</b>
-              <span className="wk-h"> · {fmt(series[show])} hrs</span>
-              {pinned!=null && hov==null && <span className="wk-pin"> pinned</span>}</>
-          : <span className="wk-h">Hover a week to read it · click to pin</span>}
-      </div>
       <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%'}}>
+        <span className="wk-thr">70%</span>
         {series.map((h,i)=>(
           <span key={weeks[i]}
-            className={'wk-b'+(i===activeIdx?' pk':'')+(i===pinned?' pinned':'')}
+            className={'wk-b'+(i===pinned?' pinned':'')}
             onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
             onClick={()=>onPick(i)}
             title={wkRange(weeks[i])+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')}>
-            <i className={noCap?'grey':band(uu(i))}
-               style={{height: uu(i)>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '0'}}/>
+            <i className={h>0 ? (noCap?'grey':band(uu(i))) : 'zero'}
+               style={{height: h>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '2px'}}/>
           </span>
         ))}
       </div>
@@ -305,6 +299,14 @@ function WeekChart({weeks, series, capWk, noCap, activeIdx, pinned, onPick, scal
           const newMonth = i===0 || new Date(weeks[i-1]).getUTCMonth()!==dt.getUTCMonth();
           return <span key={w}>{newMonth ? dt.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'}) : ''}</span>;
         })}
+      </div>
+      <div className="wk-read">
+        {show!=null && series.length
+          ? <><span className="wk-wk">{wkRange(weeks[show])}</span>
+              <b>{noCap?'—':pct(uu(show))+'%'}</b>
+              <span className="wk-h"> · {fmt(series[show])} hrs</span>
+              {pinned!=null && hov==null && <span className="wk-pin"> pinned</span>}</>
+          : null}
       </div>
     </div>
   );
@@ -404,7 +406,6 @@ function Dashboard({coeTable, allocTable, progTable}){
   const progRecords = useRecords(progTable);
 
   const [sortMode, setSortMode] = useState('az');
-  const [view, setView] = useState('quarter');   // 'quarter' = average across the quarter, 'weekly' = worst week
 
   // Capacity is a roll-up of the team's people, so the headcount behind a number is
   // part of reading it. Names come off the link field itself — People does not need
@@ -681,16 +682,6 @@ function Dashboard({coeTable, allocTable, progTable}){
           onSetAll={next=>setSelT(next)} onReset={()=>setSelT(null)}/>
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
-        {hasDates && <div className="seg" title="Quarter shows the average across the whole quarter; Weekly shows the busiest single week">
-          <button data-on={view==='quarter'?'1':'0'} onClick={()=>setView('quarter')}>Quarter average</button>
-          <button data-on={view==='weekly'?'1':'0'} onClick={()=>setView('weekly')}>Busiest week</button>
-        </div>}
-        <div className="btn-pair">
-          <button onClick={()=>setCollapsed(new Set(cards.map(t=>t.n)))}
-            disabled={cards.length>0 && cards.every(t=>collapsed.has(t.n))}>Collapse all</button>
-          <button onClick={()=>setCollapsed(new Set())}
-            disabled={collapsed.size===0}>Expand all</button>
-        </div>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
           Accepted &amp; Submitted Capacity Planning ↗</a>
       </div>
@@ -741,11 +732,11 @@ function Dashboard({coeTable, allocTable, progTable}){
           const peakIdx = series.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
           const peakU = (noCap||!series.length) ? null : series[peakIdx]/t.wk100;
           const uQ = noCap? null : d/full;
-          const wkScale = Math.max(1, peakU||0);   // chart tops out at 100%, or at the peak if it exceeds
-          const pinIdx = pinnedWk.get(t.n);
-          const activeIdx = (pinIdx!=null && pinIdx<series.length) ? pinIdx
-                          : ((view==='weekly' && hasDates && series.length) ? peakIdx : null);
-          const u = (activeIdx!=null && !noCap) ? series[activeIdx]/t.wk100 : uQ;
+          // Top of the chart is 100%, or the peak when it exceeds — plus a tenth of
+          // headroom so the tallest bar never crowds the text above it.
+          const wkScale = Math.max(1, peakU||0) * 1.1;
+          const pinIdx = (pinnedWk.get(t.n)!=null && pinnedWk.get(t.n)<series.length) ? pinnedWk.get(t.n) : null;
+          const u = (pinIdx!=null && !noCap) ? series[pinIdx]/t.wk100 : uQ;
           const bnd = (u==null)?'grey':band(u);
           const rem = cap-d, red = d>cap? d-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
@@ -758,44 +749,23 @@ function Dashboard({coeTable, allocTable, progTable}){
                   title={isCol?'Expand this team':'Collapse this team'}>
                   <span className="tname">{t.n}</span>
                   <span className="thead-r">
-                    <span className="thead-pct" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</span>
+                    {isCol && <span className="thead-pct" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</span>}
                     <span className="tcaret">{isCol?'▸':'▾'}</span>
                   </span>
                 </button>
                 {!isCol && <>
-                {t.people && <div className="prow">
-                  <button className="pcount" onClick={()=>toggleTeam(t.n)}
-                    title={t.people.length ? 'Show the people in this team' : 'No one is linked to this team'}>
-                    {t.people.length} {t.people.length===1?'person':'people'}
-                    <span>{openTeams.has(t.n)?'▾':'▸'}</span>
-                  </button>
-                  <a className="pgo" href={PEOPLE_PAGE} target="_blank" rel="noopener noreferrer">People ↗</a>
-                </div>}
-                {t.people && openTeams.has(t.n) && (
-                  t.people.length
-                    ? <ul className="plist">
-                        {t.people.map(pp=>(
-                          <li key={pp.id}>
-                            <a href={personUrl(pp.id)} target="_blank" rel="noopener noreferrer">{pp.name}</a>
-                          </li>
-                        ))}
-                      </ul>
-                    : <div className="pnone">No people linked — that is why capacity is 0.</div>
-                )}
                 <div className="urow">
                   <div className="ubig" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</div>
                   <span className={'tag '+tagCls}>{tagTxt}</span>
                 </div>
                 <div className="ucap">
-                  {activeIdx!=null
-                    ? (pinIdx!=null ? 'Week of ' : 'Busiest week — ')+'w/c '+wkLabel(selWeeks[activeIdx])
-                      +' · quarter average '+(uQ==null?'—':pct(uQ)+'%')
-                    : (hasDates && !series.length ? 'No dated work in this selection'
-                       : 'Average across the quarter ÷ full capacity')}
+                  {pinIdx!=null
+                    ? 'Week of '+wkRange(selWeeks[pinIdx])+' · quarter average '+(uQ==null?'—':pct(uQ)+'%')
+                    : (hasDates && !series.length ? 'No dated work in this selection' : 'Quarter average')}
                 </div>
                 {hasDates && series.length>0 && <WeekChart
                   weeks={selWeeks} series={series} capWk={t.wk100} noCap={noCap}
-                  activeIdx={activeIdx} pinned={pinIdx} scale={wkScale}
+                  pinned={pinIdx} scale={wkScale}
                   onPick={i=>pickWeek(t.n,i)}/>}
                 </>}
               </div>
@@ -806,6 +776,27 @@ function Dashboard({coeTable, allocTable, progTable}){
                 <div><div className="k">Hrs remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
                 <div><div className="k">Reduction to hit 70%</div><div className="v" style={{color:red>0?'var(--red)':'var(--green)'}}>{red>0?fmt(red)+' hrs':'None'}</div></div>
                 <div><div className="k">Working hrs / week</div><div className="v">{fmt(t.wk100)} <small>/ 70%: {fmt(t.wk70)}</small></div></div>
+              </div>}
+              {!isCol && t.people && <div className="pfoot">
+                <div className="prow">
+                  <button className="pcount" onClick={()=>toggleTeam(t.n)}
+                    title={t.people.length ? 'Show the people in this team' : 'No one is linked to this team'}>
+                    {t.people.length} {t.people.length===1?'person':'people'}
+                    <span>{openTeams.has(t.n)?'▾':'▸'}</span>
+                  </button>
+                  <a className="pgo" href={PEOPLE_PAGE} target="_blank" rel="noopener noreferrer">People ↗</a>
+                </div>
+                {openTeams.has(t.n) && (
+                  t.people.length
+                    ? <ul className="plist">
+                        {t.people.map(pp=>(
+                          <li key={pp.id}>
+                            <a href={personUrl(pp.id)} target="_blank" rel="noopener noreferrer">{pp.name}</a>
+                          </li>
+                        ))}
+                      </ul>
+                    : <div className="pnone">No people linked — that is why capacity is 0.</div>
+                )}
               </div>}
             </div>
           );
