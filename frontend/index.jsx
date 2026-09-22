@@ -44,6 +44,10 @@ const PLANNING_QUARTER = 'Q4';
 const PEOPLE_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/paggbWfwyVaiQu6LH';
 const personUrl = id => PEOPLE_PAGE + '/' + id;
 
+// Programme record page, same link shape the base's own formula fields use.
+const PROGRAM_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/pagjsGM6hsHBlNbuk';
+const programUrl = id => PROGRAM_PAGE + '/' + id;
+
 const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
 const REJECTED_STATUS = 'Rejected';
 
@@ -130,6 +134,10 @@ loadCSSFromString(`
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
   .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
   .cap .ucap { font-size:12px; color:var(--muted); margin-top:2px; }
+  .cap .wkstrip { display:flex; gap:2px; margin:10px 0 2px; }
+  .cap .wkcell { flex:1; height:16px; border-radius:3px; background:var(--muted); }
+  .cap .wkcell.green { background:var(--green); } .cap .wkcell.amber { background:var(--amber); }
+  .cap .wkcell.red { background:var(--red); } .cap .wkcell.grey { background:#ccc; }
   .cap .bar { height:8px; border-radius:6px; background:#eee; margin:12px 0 4px; overflow:hidden; position:relative; }
   .cap .bar > i { display:block; height:100%; border-radius:6px; }
   .cap .bar .tgt { position:absolute; top:-3px; bottom:-3px; width:2px; background:#3a2f74; opacity:.55; left:70%; }
@@ -147,6 +155,12 @@ loadCSSFromString(`
   .cap .ctx { font-size:12px; color:var(--muted); margin:-6px 0 14px; }
   .cap .ctx b { color:var(--ink); }
   .cap .ctx .warn { color:var(--amber); }
+  .cap .chips { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px; }
+  .cap .chip { font-size:12px; color:var(--muted); background:var(--card); border:1px solid var(--line);
+    border-radius:20px; padding:5px 11px; }
+  .cap .chip b { color:var(--ink); font-variant-numeric:tabular-nums; }
+  .cap a.plain { color:var(--purple); text-decoration:none; font-weight:600; }
+  .cap a.plain:hover { text-decoration:underline; }
   @media (prefers-color-scheme: dark){ .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
   @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:repeat(2,1fr);} }
   @media(max-width:640px){ .cap .grid{grid-template-columns:1fr;} }
@@ -212,6 +226,8 @@ function qBounds(k){
   const q = +m[1], y = +m[2];
   return [Date.UTC(y,(q-1)*3,1), Date.UTC(y,q*3,0)];
 }
+
+const wkLabel = ms => new Date(ms).toLocaleDateString(undefined,{day:'numeric',month:'short',timeZone:'UTC'});
 
 function qSortValue(k){
   if(k===UNASSIGNED) return Infinity;
@@ -325,6 +341,7 @@ function Dashboard({coeTable, allocTable, progTable}){
   const progRecords = useRecords(progTable);
 
   const [sortMode, setSortMode] = useState('az');
+  const [view, setView] = useState('quarter');   // 'quarter' = average across the quarter, 'weekly' = worst week
 
   // Capacity is a roll-up of the team's people, so the headcount behind a number is
   // part of reading it. Names come off the link field itself — People does not need
@@ -349,7 +366,7 @@ function Dashboard({coeTable, allocTable, progTable}){
   const [openTeams, setOpenTeams] = useState(()=>new Set());
   const [collapsed, setCollapsed] = useState(()=>new Set());
   // Section-level open/closed, so a long page can be folded down to the part in use.
-  const [openSections, setOpenSections] = useState(()=>({bu:true, teams:true, excl:true}));
+  const [openSections, setOpenSections] = useState(()=>({bu:true, teams:true, nodate:true}));
   const toggleSection = k => setOpenSections(o=>({...o, [k]:!o[k]}));
   const toggleCollapse = n => setCollapsed(prev=>{
     const next = new Set(prev);
@@ -487,25 +504,63 @@ function Dashboard({coeTable, allocTable, progTable}){
     return hit;
   };
 
+  // Every Monday inside the selected quarters, in order.
+  const selWeeks = useMemo(()=>{
+    const out = new Set();
+    selBounds.forEach(([a,b])=>{
+      for(let w = mondayOf(a); w <= b; w += MONDAY_MS) if(w >= a) out.add(w);
+    });
+    return [...out].sort((x,y)=>x-y);
+  },[selBounds]);
+  const selWeekSet = useMemo(()=>new Set(selWeeks),[selWeeks]);
+
+  // team -> Monday -> hours. The same spreading as the quarter figure, kept per week
+  // so a peak can be seen instead of averaged away.
+  const weeklyByTeam = useMemo(()=>{
+    const m = new Map();
+    if(!hasDates) return m;
+    rows.forEach(x=>{
+      if(x.isRejected || x.s==null || x.e==null || x.e < x.s) return;
+      const weeks = weeksBetween(x.s, x.e);
+      if(!weeks.length) return;
+      const per = x.sub/weeks.length;
+      weeks.forEach(w=>{
+        if(!selWeekSet.has(w)) return;
+        const t = m.get(x.coe) || new Map();
+        t.set(w, (t.get(w)||0) + per);
+        m.set(x.coe, t);
+      });
+    });
+    return m;
+  },[rows, selWeekSet, hasDates]);
+
+  // Work with no dates cannot be placed in any week, so it sits outside every figure
+  // above. Listed rather than dropped, because it is real committed hours.
+  const undated = useMemo(()=>{
+    if(!hasDates) return null;
+    const byProg = new Map(), byTeam = new Map();
+    let total = 0;
+    rows.forEach(x=>{
+      if(x.isRejected || !selTeams.has(x.coe)) return;
+      if(!(x.s==null || x.e==null || x.e < x.s)) return;
+      total += x.sub;
+      byTeam.set(x.coe, (byTeam.get(x.coe)||0) + x.sub);
+      const k = x.pid || x.pname;
+      const pr = byProg.get(k) || {id:x.pid, name:x.pname, hrs:0, teams:new Set()};
+      pr.hrs += x.sub; pr.teams.add(x.coe); byProg.set(k, pr);
+    });
+    return {
+      total,
+      teams: [...byTeam.entries()].sort((a,b)=>b[1]-a[1]),
+      progs: [...byProg.values()].sort((a,b)=>b.hrs-a.hrs),
+    };
+  },[rows, selTeams, hasDates]);
+
   const demandOf = name => rows.reduce((s,x)=>{
     if(x.coe!==name || x.isRejected) return s;
     return s + (hoursInSel(x) || 0);
   },0);
 
-  // What the figures above leave out, and why — surfaced rather than silently dropped.
-  const excluded = useMemo(()=>{
-    const m = new Map();
-    rows.forEach(x=>{
-      if(x.isRejected || !selTeams.has(x.coe)) return;
-      const h = hoursInSel(x);
-      const e = m.get(x.coe) || {counted:0, undated:0, outside:0};
-      if(h===null) e.undated += x.sub;
-      else { e.counted += h; e.outside += Math.max(0, x.sub - h); }
-      m.set(x.coe, e);
-    });
-    return [...m.entries()].filter(([,v])=>v.undated>0 || v.outside>0)
-      .sort((a,b)=>(b[1].undated+b[1].outside)-(a[1].undated+a[1].outside));
-  },[rows, selTeams, selBounds, hasDates]);
 
   // BU table (respects team + quarter filters)
   const buAgg = {}; BU_ORDER.forEach(b=>buAgg[b]={sub:0,acc:0,crit:0});
@@ -556,6 +611,10 @@ function Dashboard({coeTable, allocTable, progTable}){
           onSetAll={next=>setSelT(next)} onReset={()=>setSelT(null)}/>
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
+        {hasDates && <div className="seg" title="Quarter shows the average across the whole quarter; Weekly shows the busiest single week">
+          <button data-on={view==='quarter'?'1':'0'} onClick={()=>setView('quarter')}>Quarter average</button>
+          <button data-on={view==='weekly'?'1':'0'} onClick={()=>setView('weekly')}>Busiest week</button>
+        </div>}
         <div className="btn-pair">
           <button onClick={()=>setCollapsed(new Set(cards.map(t=>t.n)))}
             disabled={cards.length>0 && cards.every(t=>collapsed.has(t.n))}>Collapse all</button>
@@ -608,7 +667,12 @@ function Dashboard({coeTable, allocTable, progTable}){
           // Percentage and colour run off full capacity; "remaining" and the
           // reduction still measure against the 70% allowance, which is the
           // number a lead actually plans to.
-          const u = noCap? null : d/full, bnd = noCap?'grey':band(u);
+          const series = selWeeks.map(w=>(weeklyByTeam.get(t.n)||new Map()).get(w)||0);
+          const peakIdx = series.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
+          const peakU = (noCap||!series.length) ? null : series[peakIdx]/t.wk100;
+          const uQ = noCap? null : d/full;
+          const u = (view==='weekly' && hasDates) ? peakU : uQ;
+          const bnd = (u==null)?'grey':band(u);
           const rem = cap-d, red = d>cap? d-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
           const tagTxt = noCap?'No capacity set':(bnd==='red'?'Over threshold':bnd==='amber'?'Approaching':'Healthy');
@@ -648,7 +712,19 @@ function Dashboard({coeTable, allocTable, progTable}){
                   <div className="ubig" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</div>
                   <span className={'tag '+tagCls}>{tagTxt}</span>
                 </div>
-                <div className="ucap">Submitted hrs ÷ full capacity — the marker is the 70% allowance</div>
+                <div className="ucap">
+                  {view==='weekly' && hasDates
+                    ? (series.length ? 'Busiest week — w/c '+wkLabel(selWeeks[peakIdx])+' · quarter average '+(uQ==null?'—':pct(uQ)+'%') : 'No dated work in this selection')
+                    : 'Average across the quarter ÷ full capacity — the marker is the 70% allowance'}
+                </div>
+                {hasDates && series.length>0 && <div className="wkstrip">
+                  {series.map((h,i)=>{
+                    const uu = noCap?0:h/t.wk100;
+                    return <span key={selWeeks[i]} className={'wkcell '+(noCap?'grey':band(uu))}
+                      style={{opacity: 0.22 + Math.min(1,uu)*0.78}}
+                      title={'w/c '+wkLabel(selWeeks[i])+' — '+(noCap?'no capacity':pct(uu)+'%'+' · '+fmt(h)+' hrs')}/>;
+                  })}
+                </div>}
                 <div className="bar"><i style={{width:Math.min(100,(u||0)*100)+'%',background:noCap?'#ccc':BC[bnd]}}/>{!noCap&&<span className="tgt"/>}</div>
                 </>}
               </div>
@@ -665,31 +741,34 @@ function Dashboard({coeTable, allocTable, progTable}){
         })}
       </div>}
 
-      {hasDates && excluded.length>0 && <>
-        <button className="st st-toggle" onClick={()=>toggleSection('excl')}
-          title={openSections.excl?'Collapse':'Expand'}>
-          Not counted — by date <span className="tcaret">{openSections.excl?'▾':'▸'}</span>
+      {undated && undated.progs.length>0 && <>
+        <button className="st st-toggle" onClick={()=>toggleSection('nodate')}
+          title={openSections.nodate?'Collapse':'Expand'}>
+          Missing work dates <span className="tcaret">{openSections.nodate?'▾':'▸'}</span>
         </button>
-        {openSections.excl && <>
+        {openSections.nodate && <>
           <div className="ctx">
-            Hours are placed by <b>Est. Work Start / End Date</b>, not by the quarter a programme
-            is tagged to. These are the hours that fall outside the selected quarter{selQ.size>1?'s':''},
-            or that cannot be placed at all because no dates are set.
+            <b>{fmt(undated.total)} hrs</b> across <b>{undated.progs.length}</b> programme{undated.progs.length===1?'':'s'}
+            {' '}have no Est. Work Start or End date, so they cannot be placed in a week and are
+            counted nowhere above. Add dates and they appear.
+          </div>
+          <div className="chips">
+            {undated.teams.map(([coe,h])=>(
+              <span className="chip" key={coe}>{coe} <b>{fmt(h)}</b> hrs</span>
+            ))}
           </div>
           <table>
-            <thead><tr><th>Team</th><th className="num">Counted in selection</th>
-              <th className="num">Scheduled outside</th><th className="num">No work dates</th></tr></thead>
+            <thead><tr><th>Programme</th><th className="num">Hours</th><th>Teams waiting</th></tr></thead>
             <tbody>
-              {excluded.map(([coe,v])=>(
-                <tr key={coe}><td><b>{coe}</b></td>
-                  <td className="num">{fmt(v.counted)}</td>
-                  <td className="num">{fmt(v.outside)}</td>
-                  <td className="num" style={{color:v.undated>0?'var(--amber)':'inherit'}}>{fmt(v.undated)}</td></tr>
+              {undated.progs.map(pr=>(
+                <tr key={pr.id||pr.name}>
+                  <td>{pr.id
+                    ? <a className="plain" href={programUrl(pr.id)} target="_blank" rel="noopener noreferrer">{pr.name} ↗</a>
+                    : pr.name}</td>
+                  <td className="num">{fmt(pr.hrs)}</td>
+                  <td>{[...pr.teams].sort().join(', ')}</td>
+                </tr>
               ))}
-              <tr className="total"><td>Total</td>
-                <td className="num">{fmt(excluded.reduce((a,[,v])=>a+v.counted,0))}</td>
-                <td className="num">{fmt(excluded.reduce((a,[,v])=>a+v.outside,0))}</td>
-                <td className="num">{fmt(excluded.reduce((a,[,v])=>a+v.undated,0))}</td></tr>
             </tbody>
           </table>
         </>}
