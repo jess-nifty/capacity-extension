@@ -235,7 +235,8 @@ function qKey(q, y){ return q ? (y ? q+' '+y : q) : UNASSIGNED; }
 // have work running in Q3, or in Q1 of the following year. Hours are spread evenly
 // across the Mondays between Est. Work Start and End — the same method the native
 // capacity page uses — and only the weeks landing inside the selection are counted.
-const MONDAY_MS = 7*86400000;
+const DAY_MS = 86400000;
+const MONDAY_MS = 7*DAY_MS;
 function parseDate(v){
   if(!v) return null;
   const t = String(v);
@@ -246,11 +247,6 @@ function mondayOf(ms){
   const d = new Date(ms);
   const back = (d.getUTCDay()+6)%7;           // Monday = 0
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()-back);
-}
-function weeksBetween(s, e){
-  const out = [];
-  for(let w = mondayOf(s); w <= e && out.length < 520; w += MONDAY_MS) out.push(w);
-  return out;
 }
 // "Q4 2026" -> the first and last instant of that quarter.
 function qBounds(k){
@@ -614,11 +610,10 @@ function Dashboard({coeTable, allocTable, progTable, holidays}){
   const hoursInSel = x => {
     if(!hasDates) return inQ(x.qk) ? x.sub : 0;     // no dates exposed: fall back to the tag
     if(x.s==null || x.e==null || x.e < x.s) return null;
-    const weeks = weeksBetween(x.s, x.e);
-    if(!weeks.length) return 0;
-    const per = x.sub/weeks.length;
+    const wm = rowWeeks.get(x.id);
+    if(!wm) return 0;
     let hit = 0;
-    weeks.forEach(w=>{ if(selBounds.some(([a,b])=>w>=a && w<=b)) hit += per; });
+    selWeeks.forEach(w=>{ hit += wm.get(w)||0; });
     return hit;
   };
 
@@ -632,25 +627,48 @@ function Dashboard({coeTable, allocTable, progTable, holidays}){
   },[selBounds]);
   const selWeekSet = useMemo(()=>new Set(selWeeks),[selWeeks]);
 
-  // team -> Monday -> hours. The same spreading as the quarter figure, kept per week
-  // so a peak can be seen instead of averaged away.
+  // Spread each allocation across its working days — weekdays that are not a public
+  // holiday for that team — rather than evenly across its weeks. Dividing by weeks
+  // gave a partial week a full week's load, and gave a holiday week a full load
+  // against reduced capacity, which spiked utilisation exactly where it should dip.
+  const rowWeeks = useMemo(()=>{
+    const m = new Map();
+    rows.forEach(x=>{
+      if(x.s==null || x.e==null || x.e < x.s) return;
+      const hset = holidays ? (holidays.get(x.coe) || holidays.get('*')) : null;
+      const counts = new Map();
+      let days = 0;
+      for(let t = x.s; t <= x.e; t += DAY_MS){
+        const dow = new Date(t).getUTCDay();
+        if(dow===0 || dow===6) continue;              // weekends are not working days
+        if(hset && hset.has(t)) continue;             // nor are that team's holidays
+        days++;
+        const w = mondayOf(t);
+        counts.set(w, (counts.get(w)||0) + 1);
+      }
+      if(!days) return;
+      const perDay = x.sub/days;
+      const out = new Map();
+      counts.forEach((n,w)=>out.set(w, n*perDay));
+      m.set(x.id, out);
+    });
+    return m;
+  },[rows, holidays]);
+
+  // team -> Monday -> hours, for the weeks on screen.
   const weeklyByTeam = useMemo(()=>{
     const m = new Map();
     if(!hasDates) return m;
     rows.forEach(x=>{
-      if(x.isRejected || x.s==null || x.e==null || x.e < x.s) return;
-      const weeks = weeksBetween(x.s, x.e);
-      if(!weeks.length) return;
-      const per = x.sub/weeks.length;
-      weeks.forEach(w=>{
-        if(!selWeekSet.has(w)) return;
-        const t = m.get(x.coe) || new Map();
-        t.set(w, (t.get(w)||0) + per);
-        m.set(x.coe, t);
-      });
+      if(x.isRejected) return;
+      const wm = rowWeeks.get(x.id);
+      if(!wm) return;
+      const t = m.get(x.coe) || new Map();
+      wm.forEach((h,w)=>{ if(selWeekSet.has(w)) t.set(w, (t.get(w)||0) + h); });
+      m.set(x.coe, t);
     });
     return m;
-  },[rows, selWeekSet, hasDates]);
+  },[rows, rowWeeks, selWeekSet, hasDates]);
 
   // Work with no dates cannot be placed in any week, so it sits outside every figure
   // above. Listed rather than dropped, because it is real committed hours.
@@ -840,7 +858,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays}){
                 </>}
               </div>
               {!isCol && <div className="metrics">
-                <div><div className="k">Working hrs / quarter {holidays?'(net of holidays)':'(100%)'}</div><div className="v">{fmt(t.wk100*WEEKS*nQ)}</div></div>
+                <div><div className="k">Working hrs / quarter {holidays?'(net of holidays)':'(100%)'}</div><div className="v">{fmt(full)}</div></div>
                 <div><div className="k">Usable / quarter (70%)</div><div className="v">{fmt(cap)} <small>hrs</small></div></div>
                 <div><div className="k">Submitted hrs</div><div className="v">{fmt(d)}</div></div>
                 <div><div className="k">Hrs remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
