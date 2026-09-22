@@ -12,6 +12,10 @@ const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGd
              people:'fldUFFAf7b0AtmeJl'};
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
               status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h'};
+// US Public Holidays. Each row carries a date and the CoEs that observe it, so a
+// holiday can be team-specific even though today every row links to every team.
+const HOL = {table:'tblR2HjOPhwqZwOD3', date:'fldohX95jG7q7XaET', coes:'fldvq3NifBONt5cnk'};
+
 const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
               quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN'};
 
@@ -65,7 +69,7 @@ loadCSSFromString(`
     --green:#1f9d55; --green-bg:#e5f6ec; --amber:#c98a00; --amber-bg:#fdf3dd; --red:#d13c3c; --red-bg:#fbe7e7;
     position:absolute; inset:0; overflow:auto; background:var(--bg); color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; padding:24px; }
-  .cap h1 { font-size:24px; margin:0 0 14px; letter-spacing:-.5px; }
+  .cap h1 { font-size:30px; margin:0 0 16px; letter-spacing:-.7px; }
   .cap .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:0 0 20px; }
   .cap select, .cap button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:9px; padding:7px 11px; color:var(--ink); cursor:pointer; }
   .cap .dd { position:relative; }
@@ -96,7 +100,17 @@ loadCSSFromString(`
   .cap table { width:100%; border-collapse:separate; border-spacing:0; background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; font-size:13.5px; }
   .cap th, .cap td { padding:11px 14px; text-align:left; border-bottom:1px solid var(--line); }
   .cap th { background:var(--purple-soft); color:#3a2f74; font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
-  .cap td.num, .cap th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .cap td.num, .cap th.num { text-align:right; font-variant-numeric:tabular-nums;
+    width:1%; white-space:nowrap; padding-left:22px; }
+  /* Numeric columns shrink to their content so the name column absorbs the slack,
+     instead of four columns splitting the width evenly and drifting apart. */
+  /* max-content, not auto: a table in a full-width block was still being stretched,
+     which pushed the name column away from the first number. */
+  .cap table.bu { width:max-content; max-width:100%; }
+  .cap table.bu td:first-child, .cap table.bu th:first-child { min-width:150px; }
+  .cap .acc { color:var(--green); }
+  .cap td.acc { font-weight:700; }
+  .cap th.acc { color:var(--green); }
   .cap tr:last-child td { border-bottom:none; }
   .cap tr.total td { background:#faf9ff; font-weight:700; }
   .cap .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start; }
@@ -176,6 +190,8 @@ loadCSSFromString(`
   .cap .chip { font-size:12px; color:var(--muted); background:var(--card); border:1px solid var(--line);
     border-radius:20px; padding:5px 11px; }
   .cap .chip b { color:var(--ink); font-variant-numeric:tabular-nums; }
+  .cap .miss { display:inline-block; background:var(--amber-bg); color:var(--amber); font-size:11px;
+    font-weight:700; border-radius:5px; padding:2px 7px; margin-right:5px; white-space:nowrap; }
   .cap a.plain { color:var(--purple); text-decoration:none; font-weight:600; }
   .cap a.plain:hover { text-decoration:underline; }
   @media (prefers-color-scheme: dark){ .cap .pfoot { background:#211d33; } .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
@@ -274,10 +290,10 @@ function lookupText(cell){
 
 // One card's weekly load. Hovering reads a week out; clicking pins it as the
 // card's headline figure so it can be compared against other teams.
-function WeekChart({weeks, series, capWk, noCap, pinned, onPick, scale}){
+function WeekChart({weeks, series, caps, noCap, pinned, onPick, scale}){
   const [hov, setHov] = useState(null);
   const show = hov!=null ? hov : pinned;
-  const uu = i => (noCap || !capWk) ? 0 : series[i]/capWk;
+  const uu = i => (noCap || !caps[i]) ? 0 : series[i]/caps[i];
   return (
     <div className="wk">
       <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%'}}>
@@ -356,6 +372,27 @@ function Dropdown({label, options, selected, onToggle, onSetAll, onReset}){
 }
 
 
+// The holiday table is optional, and useRecords cannot take a null table, so the
+// read lives in its own component that only mounts when the table is exposed.
+function HolidayLoader({table, children}){
+  const recs = useRecords(table);
+  const byTeam = useMemo(()=>{
+    const m = new Map();
+    (recs||[]).forEach(r=>{
+      const ms = parseDate(r.getCellValue(HOL.date));
+      if(ms==null) return;
+      const teams = r.getCellValue(HOL.coes) || [];
+      const names = teams.length ? teams.map(t=>String(t.name).trim()) : ['*'];
+      names.forEach(n=>{
+        if(!m.has(n)) m.set(n, new Set());
+        m.get(n).add(ms);
+      });
+    });
+    return m;
+  },[recs]);
+  return children(byTeam);
+}
+
 function App(){
   const base = useBase();
   const coeTable = base.getTableByIdIfExists(COE.table);
@@ -397,10 +434,15 @@ function App(){
       </ul></div>;
   }
 
-  return <Dashboard coeTable={coeTable} allocTable={allocTable} progTable={progTable}/>;
+  const holTable = base.getTableByIdIfExists(HOL.table);
+  const dash = hols => <Dashboard coeTable={coeTable} allocTable={allocTable}
+                                  progTable={progTable} holidays={hols}/>;
+  return holTable
+    ? <HolidayLoader table={holTable}>{dash}</HolidayLoader>
+    : dash(null);
 }
 
-function Dashboard({coeTable, allocTable, progTable}){
+function Dashboard({coeTable, allocTable, progTable, holidays}){
   const coeRecords = useRecords(coeTable);
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
@@ -520,7 +562,10 @@ function Dashboard({coeTable, allocTable, progTable}){
         qk: qKey(q, y),
         bu: pm ? pm.bu : 'Unassigned',
         crit: pm ? pm.crit : false,
-        test: pm ? pm.test : false,
+        // No programme record means we cannot confirm it is not a test or rejected —
+        // and it also means a filter on the Programs data source has hidden it. Either
+        // way the allocation is dropped rather than counted on an assumption.
+        test: pm ? pm.test : true,
         st,
         // Both false when Program Status isn't exposed, so every total keeps its
         // previous unfiltered behaviour rather than silently dropping to zero.
@@ -530,6 +575,8 @@ function Dashboard({coeTable, allocTable, progTable}){
         e: hasDates ? parseDate(r.getCellValue(ALLOC.end)) : null,
       };
     }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
+    // ^ programmes with Testing Programs ticked are excluded here, and so is any
+    //   allocation whose programme the extension cannot see.
   },[allocRecords, progMap, hasAllocStatus, hasDates]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
@@ -617,8 +664,11 @@ function Dashboard({coeTable, allocTable, progTable}){
       total += x.sub;
       byTeam.set(x.coe, (byTeam.get(x.coe)||0) + x.sub);
       const k = x.pid || x.pname;
-      const pr = byProg.get(k) || {id:x.pid, name:x.pname, hrs:0, teams:new Set()};
-      pr.hrs += x.sub; pr.teams.add(x.coe); byProg.set(k, pr);
+      const pr = byProg.get(k) || {id:x.pid, name:x.pname, hrs:0, teams:new Set(), miss:new Set()};
+      pr.hrs += x.sub; pr.teams.add(x.coe);
+      // Which date is actually absent — "no dates" sent people hunting for the wrong one.
+      pr.miss.add(x.s==null && x.e==null ? 'both' : (x.s==null ? 'start' : 'end'));
+      byProg.set(k, pr);
     });
     return {
       total,
@@ -626,6 +676,21 @@ function Dashboard({coeTable, allocTable, progTable}){
       progs: [...byProg.values()].sort((a,b)=>b.hrs-a.hrs),
     };
   },[rows, selTeams, hasDates]);
+
+  // A week containing a public holiday is worth four days, not five. Capacity is
+  // therefore summed week by week rather than taken as a flat 13 x weekly hours.
+  const holsInWeek = (team, weekMs) => {
+    if(!holidays) return 0;
+    const set = holidays.get(team) || holidays.get('*');
+    if(!set) return 0;
+    let n = 0;
+    for(let d=0; d<5; d++) if(set.has(weekMs + d*86400000)) n++;
+    return n;
+  };
+  const weekCapOf = (t, weekMs) => t.wk100 * (5 - holsInWeek(t.n, weekMs)) / 5;
+  const fullCapOf = t => selWeeks.length
+    ? selWeeks.reduce((a,w)=>a+weekCapOf(t,w),0)
+    : t.wk100*WEEKS*nQ;                       // no dates exposed: flat quarter
 
   const demandOf = name => rows.reduce((s,x)=>{
     if(x.coe!==name || x.isRejected) return s;
@@ -702,41 +767,46 @@ function Dashboard({coeTable, allocTable, progTable}){
       </div>
 
       <button className="st st-toggle" onClick={()=>toggleSection('bu')}
-        title={openSections.bu?'Collapse Business Units':'Expand Business Units'}>
-        Business Units <span className="tcaret">{openSections.bu?'▾':'▸'}</span>
+        title={openSections.bu?'Collapse this section':'Expand this section'}>
+        Total per Business Unit <span className="tcaret">{openSections.bu?'▾':'▸'}</span>
       </button>
-      {openSections.bu && <table>
-        <thead><tr><th>Business Unit</th><th className="num">Submitted hrs</th><th className="num">Accepted hrs</th><th className="num">Business-critical hrs</th></tr></thead>
+      {openSections.bu && <table className="bu">
+        <thead><tr><th>Business Unit</th><th className="num">Submitted hrs</th>
+          <th className="num">Business-critical hrs</th><th className="num acc">Accepted hrs</th></tr></thead>
         <tbody>
           {BU_ORDER.map(b=>(
             <tr key={b}><td><b>{b}</b></td>
               <td className="num">{fmt(buAgg[b].sub)}</td>
-              <td className="num">{fmt(buAgg[b].acc)}</td>
-              <td className="num">{fmt(buAgg[b].crit)}</td></tr>
+              <td className="num">{fmt(buAgg[b].crit)}</td>
+              <td className="num acc">{fmt(buAgg[b].acc)}</td></tr>
           ))}
-          <tr className="total"><td>Total</td><td className="num">{fmt(tot.sub)}</td><td className="num">{fmt(tot.acc)}</td><td className="num">{fmt(tot.crit)}</td></tr>
+          <tr className="total"><td>Total</td><td className="num">{fmt(tot.sub)}</td>
+            <td className="num">{fmt(tot.crit)}</td><td className="num acc">{fmt(tot.acc)}</td></tr>
         </tbody>
       </table>}
 
       <button className="st st-toggle" onClick={()=>toggleSection('teams')}
-        title={openSections.teams?'Collapse Team Capacity':'Expand Team Capacity'}>
-        Team Capacity (per CoE) <span className="tcaret">{openSections.teams?'▾':'▸'}</span>
+        title={openSections.teams?'Collapse this section':'Expand this section'}>
+        Team Capacity <span className="tcaret">{openSections.teams?'▾':'▸'}</span>
       </button>
       {openSections.teams && <div className="grid">
         {cards.map(t=>{
-          const noCap=t.wk100===0, full=t.wk100*WEEKS*nQ, cap=t.wk70*WEEKS*nQ, d=demandOf(t.n);
+          const noCap=t.wk100===0, full=fullCapOf(t), d=demandOf(t.n);
+          const cap = t.wk100>0 ? full*(t.wk70/t.wk100) : 0;   // the same 70% of a holiday-adjusted quarter
           // Percentage and colour run off full capacity; "remaining" and the
           // reduction still measure against the 70% allowance, which is the
           // number a lead actually plans to.
           const series = selWeeks.map(w=>(weeklyByTeam.get(t.n)||new Map()).get(w)||0);
-          const peakIdx = series.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
-          const peakU = (noCap||!series.length) ? null : series[peakIdx]/t.wk100;
+          const weekCaps = selWeeks.map(w=>weekCapOf(t,w));
+          const ratios = series.map((h,i)=>weekCaps[i]>0 ? h/weekCaps[i] : 0);
+          const peakIdx = ratios.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
+          const peakU = (noCap||!series.length) ? null : ratios[peakIdx];
           const uQ = noCap? null : d/full;
           // Top of the chart is 100%, or the peak when it exceeds — plus a tenth of
           // headroom so the tallest bar never crowds the text above it.
           const wkScale = Math.max(1, peakU||0) * 1.1;
           const pinIdx = (pinnedWk.get(t.n)!=null && pinnedWk.get(t.n)<series.length) ? pinnedWk.get(t.n) : null;
-          const u = (pinIdx!=null && !noCap) ? series[pinIdx]/t.wk100 : uQ;
+          const u = (pinIdx!=null && !noCap) ? ratios[pinIdx] : uQ;
           const bnd = (u==null)?'grey':band(u);
           const rem = cap-d, red = d>cap? d-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
@@ -764,13 +834,13 @@ function Dashboard({coeTable, allocTable, progTable}){
                     : (hasDates && !series.length ? 'No dated work in this selection' : 'Quarter average')}
                 </div>
                 {hasDates && series.length>0 && <WeekChart
-                  weeks={selWeeks} series={series} capWk={t.wk100} noCap={noCap}
+                  weeks={selWeeks} series={series} caps={weekCaps} noCap={noCap}
                   pinned={pinIdx} scale={wkScale}
                   onPick={i=>pickWeek(t.n,i)}/>}
                 </>}
               </div>
               {!isCol && <div className="metrics">
-                <div><div className="k">Working hrs / quarter (100%)</div><div className="v">{fmt(t.wk100*WEEKS*nQ)}</div></div>
+                <div><div className="k">Working hrs / quarter {holidays?'(net of holidays)':'(100%)'}</div><div className="v">{fmt(t.wk100*WEEKS*nQ)}</div></div>
                 <div><div className="k">Usable / quarter (70%)</div><div className="v">{fmt(cap)} <small>hrs</small></div></div>
                 <div><div className="k">Submitted hrs</div><div className="v">{fmt(d)}</div></div>
                 <div><div className="k">Hrs remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
@@ -811,8 +881,9 @@ function Dashboard({coeTable, allocTable, progTable}){
         {openSections.nodate && <>
           <div className="ctx">
             <b>{fmt(undated.total)} hrs</b> across <b>{undated.progs.length}</b> programme{undated.progs.length===1?'':'s'}
-            {' '}have no Est. Work Start or End date, so they cannot be placed in a week and are
-            counted nowhere above. Add dates and they appear.
+            {' '}are missing a work date, so they cannot be placed in a week and are counted
+            nowhere above. The <b>Missing</b> column says which one. Fill it and they appear —
+            no reload needed.
           </div>
           <div className="chips">
             {undated.teams.map(([coe,h])=>(
@@ -820,7 +891,7 @@ function Dashboard({coeTable, allocTable, progTable}){
             ))}
           </div>
           <table>
-            <thead><tr><th>Programme</th><th className="num">Hours</th><th>Teams waiting</th></tr></thead>
+            <thead><tr><th>Programme</th><th className="num">Hours</th><th>Missing</th><th>Teams waiting</th></tr></thead>
             <tbody>
               {undated.progs.map(pr=>(
                 <tr key={pr.id||pr.name}>
@@ -828,6 +899,9 @@ function Dashboard({coeTable, allocTable, progTable}){
                     ? <a className="plain" href={programUrl(pr.id)} target="_blank" rel="noopener noreferrer">{pr.name} ↗</a>
                     : pr.name}</td>
                   <td className="num">{fmt(pr.hrs)}</td>
+                  <td>{[...pr.miss].sort().map(m=>(
+                    <span className="miss" key={m}>{m==='both'?'start + end':'Est. Work '+m}</span>
+                  ))}</td>
                   <td>{[...pr.teams].sort().join(', ')}</td>
                 </tr>
               ))}
