@@ -11,7 +11,10 @@ import React, {useState, useMemo} from 'react';
 const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGdC0wZqfDuiy', wk70:'fldvuSkFOY4yp6dUs',
              people:'fldUFFAf7b0AtmeJl'};
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
-              status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h'};
+              status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h',
+              size:'fld3XLGMXBIybT2E0'};
+// Estimated Sizing rows are named "<Team> - <size>", so the size is the tail.
+const sizeOf = n => { const m = /[-–]\s*(XS|S|M|L|XL)\s*$/i.exec(String(n||'')); return m ? m[1].toUpperCase() : null; };
 // People. Leaders are excluded from headcount and the names list: they carry no
 // working hours, so they are already absent from capacity, and counting them made
 // a team look larger than the number the capacity figure is built from.
@@ -129,6 +132,12 @@ loadCSSFromString(`
   .cap .thead:hover .tname { color:var(--purple); }
   .cap .thead-r { margin-left:auto; display:inline-flex; align-items:center; gap:9px; }
   .cap .thead-pct { font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.3px; }
+  .cap .menu-ov { position:fixed; inset:0; z-index:40; }
+  .cap .menu { position:fixed; z-index:41; background:var(--card); border:1px solid var(--line);
+    border-radius:10px; box-shadow:0 10px 30px rgba(40,30,90,.18); padding:5px; min-width:180px; }
+  .cap .menu button { display:block; width:100%; text-align:left; border:none; background:transparent;
+    border-radius:7px; padding:8px 11px; font-size:13px; color:var(--ink); }
+  .cap .menu button:hover { background:var(--purple-soft); color:var(--purple); }
   .cap .tcaret { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
     border-radius:50%; background:var(--purple-soft); color:var(--purple); font-size:15px; font-weight:700;
     line-height:1; flex:none; }
@@ -150,11 +159,25 @@ loadCSSFromString(`
   .cap .plist a:hover { background:var(--purple-soft); color:var(--purple); }
   .cap .plist li.lead { display:flex; align-items:baseline; gap:8px; }
   .cap .plist li.lead a { color:var(--muted); }
+  .cap .plist li.prog { display:flex; align-items:baseline; gap:8px; }
+  .cap .plist li.prog a { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .plist li.prog .wk-h { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .cap .szt { font-size:10px; font-weight:700; color:var(--purple); background:var(--purple-soft);
+    border-radius:4px; padding:1px 5px; }
   .cap .leadtag { font-size:10.5px; color:var(--muted); font-style:italic; white-space:nowrap; }
   .cap .pnone { font-size:12px; color:var(--muted); margin:0 0 12px; }
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
   .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
   .cap .ucap { font-size:12px; color:var(--muted); margin-top:2px; }
+  /* The reasoning hangs off the status tag rather than occupying a line of its own.
+     Anchored right and below so it stays inside the card, which clips overflow. */
+  .cap .tagwrap { position:relative; display:inline-flex; }
+  .cap .tag.has-tip { cursor:help; border-bottom:1px dotted currentColor; }
+  .cap .tagwrap .tip { position:absolute; top:calc(100% + 7px); right:0; width:255px; z-index:30;
+    background:#2a2440; color:#fff; font-size:11.5px; line-height:1.45; padding:9px 11px;
+    border-radius:9px; box-shadow:0 10px 26px rgba(20,14,45,.28); text-align:left;
+    opacity:0; visibility:hidden; transform:translateY(-3px); transition:opacity .12s, transform .12s; }
+  .cap .tagwrap:hover .tip { opacity:1; visibility:visible; transform:translateY(0); }
   .cap .wk { margin:18px 0 2px; }
   .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:62px;
     border-bottom:1px solid var(--line); }
@@ -517,6 +540,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   // single header row so a long list of teams stays scannable.
   const [openTeams, setOpenTeams] = useState(()=>new Set());
   const [collapsed, setCollapsed] = useState(()=>new Set());
+  // Right-clicking a card's caret offers expand/collapse for every team, so the
+  // action lives on the control it affects rather than in the toolbar.
+  const [menu, setMenu] = useState(null);
   // A week pinned on a card overrides whichever figure the view would otherwise show.
   const [pinnedWk, setPinnedWk] = useState(()=>new Map());
   const pickWeek = (team,i) => setPinnedWk(prev=>{
@@ -558,6 +584,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   // is exposed — at that point rejected programs genuinely cannot be identified.
   const hasDates = !!allocTable.getFieldByIdIfExists(ALLOC.start)
                 && !!allocTable.getFieldByIdIfExists(ALLOC.end);
+  const hasSize = !!allocTable.getFieldByIdIfExists(ALLOC.size);
   const hasProgStatus = !!progTable.getFieldByIdIfExists(PROG.status);
   const hasAllocStatus = !!allocTable.getFieldByIdIfExists(ALLOC.status);
   const hasStatusField = hasProgStatus || hasAllocStatus;
@@ -617,13 +644,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
         // previous unfiltered behaviour rather than silently dropping to zero.
         isAccepted: st ? ACCEPTED_STATUSES.has(st) : false,
         isRejected: st ? st === REJECTED_STATUS : false,
+        size: hasSize ? sizeOf(firstLink(r.getCellValue(ALLOC.size))?.name) : null,
         s: hasDates ? parseDate(r.getCellValue(ALLOC.start)) : null,
         e: hasDates ? parseDate(r.getCellValue(ALLOC.end)) : null,
       };
     }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
     // ^ programmes with Testing Programs ticked are excluded here, and so is any
     //   allocation whose programme the extension cannot see.
-  },[allocRecords, progMap, hasAllocStatus, hasDates]);
+  },[allocRecords, progMap, hasAllocStatus, hasDates, hasSize]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -760,6 +788,114 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     ? selWeeks.reduce((a,w)=>a+weekCapOf(t,w),0)
     : t.wk100*WEEKS*nQ;                       // no dates exposed: flat quarter
 
+  // The programmes contributing to each team inside the selection.
+  const teamProgs = useMemo(()=>{
+    const m = new Map();
+    if(!hasDates) return m;
+    rows.forEach(x=>{
+      if(x.isRejected) return;
+      const wm = rowWeeks.get(x.id);
+      if(!wm) return;
+      let h = 0;
+      selWeeks.forEach(w=>{ h += wm.get(w)||0; });
+      if(h<=0) return;
+      const t = m.get(x.coe) || new Map();
+      const k = x.pid || x.pname;
+      const cur = t.get(k) || {id:x.pid, name:x.pname, hrs:0, size:x.size};
+      cur.hrs += h;
+      if(!cur.size && x.size) cur.size = x.size;
+      t.set(k, cur); m.set(x.coe, t);
+    });
+    const out = new Map();
+    m.forEach((t,k)=>out.set(k, [...t.values()].sort((a,b)=>b.hrs-a.hrs)));
+    return out;
+  },[rows, rowWeeks, selWeeks, hasDates]);
+
+  const [openProgs, setOpenProgs] = useState(()=>new Set());
+  const toggleProgs = n => setOpenProgs(prev=>{
+    const next = new Set(prev);
+    next.has(n) ? next.delete(n) : next.add(n);
+    return next;
+  });
+
+  // Why a team is over: read off the data rather than asserted. Only the two
+  // strongest signals are kept, so the line stays one line.
+  const shortName = n => { const t = String(n||'').trim(); return t.length>30 ? t.slice(0,29)+'…' : t; };
+  const diagnosis = useMemo(()=>{
+    const m = new Map();
+    if(!hasDates || !selWeeks.length) return m;
+    teams.forEach(t=>{
+      if(t.wk100<=0) return;
+      const full = fullCapOf(t);
+      if(full<=0) return;
+      const byProg = new Map(), perWeek = new Map(), progsPerWeek = new Map();
+      let total = 0;
+      rows.forEach(x=>{
+        if(x.coe!==t.n || x.isRejected) return;
+        const wm = rowWeeks.get(x.id);
+        if(!wm) return;
+        let h = 0;
+        selWeeks.forEach(w=>{
+          const v = wm.get(w)||0;
+          if(v<=0) return;
+          h += v;
+          perWeek.set(w, (perWeek.get(w)||0) + v);
+          if(!progsPerWeek.has(w)) progsPerWeek.set(w, new Set());
+          progsPerWeek.get(w).add(x.pname);
+        });
+        if(h<=0) return;
+        total += h;
+        byProg.set(x.pname, (byProg.get(x.pname)||0) + h);
+      });
+      // The busiest week, and how many programmes are running in it.
+      let peakWeek = null, peakLoad = -1;
+      perWeek.forEach((v,w)=>{ if(v>peakLoad){ peakLoad=v; peakWeek=w; } });
+      const peakProgs = peakWeek!=null ? (progsPerWeek.get(peakWeek)||new Set()).size : 0;
+      if(total <= full*0.70) return;            // only speak up past the threshold
+
+      // Each signal points at a different remedy: re-size the big one, staff up,
+      // stagger the overlap. "Over in n of 13 weeks" was dropped — it restated the
+      // symptom rather than explaining it.
+      const parts = [];
+      const sorted = [...byProg.entries()].sort((a,b)=>b[1]-a[1]);
+
+      if(sorted.length && sorted[0][1]/full >= 0.35)
+        parts.push(shortName(sorted[0][0])+' alone is '+pct(sorted[0][1]/full)+'% of the quarter');
+
+      const top3 = sorted.slice(0,3).reduce((a,[,v])=>a+v, 0);
+      if(parts.length<2 && sorted.length>=3 && top3/total >= 0.65)
+        parts.push('3 programmes are '+pct(top3/total)+'% of the load');
+
+      const heads = t.people ? t.people.filter(pp=>!pp.leader).length : null;
+      const need = heads ? Math.round(total/full*heads) : null;
+      if(parts.length<2 && need && need >= heads+1)
+        parts.push(fmt(total)+' hrs equates to ~'+need+' people, team has '+heads);
+
+      // Sizing: a wall of large programmes is a different problem from many small ones.
+      if(parts.length<2){
+        const big = (teamProgs.get(t.n)||[]).filter(pp=>pp.size==='L' || pp.size==='XL');
+        const xl = big.filter(pp=>pp.size==='XL').length, lg = big.length - xl;
+        if(xl+lg >= 3){
+          const bits = [];
+          if(xl) bits.push(xl+' XL');
+          if(lg) bits.push(lg+' L');
+          parts.push(bits.join(' and ')+' programme'+(xl+lg===1?'':'s')+' this quarter');
+        }
+      }
+
+      let usedOverlap = false;
+      if(parts.length<2 && peakWeek && peakProgs >= 4){
+        parts.push(peakProgs+' programmes overlap in the busiest week');
+        usedOverlap = true;
+      }
+      if(parts.length<2 && !usedOverlap && sorted.length>=10)
+        parts.push(sorted.length+' programmes in one quarter');
+
+      if(parts.length) m.set(t.n, parts.slice(0,2).join(' · '));
+    });
+    return m;
+  },[teams, rows, rowWeeks, selWeeks, weeklyByTeam, holidays, hasDates, teamProgs]);
+
   const demandOf = name => rows.reduce((s,x)=>{
     if(x.coe!==name || x.isRejected) return s;
     return s + (hoursInSel(x) || 0);
@@ -884,7 +1020,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
             <div className={'team'+(isCol?' collapsed':'')} key={t.n}>
               <div className="top">
                 <button className="thead" onClick={()=>toggleCollapse(t.n)}
-                  title={isCol?'Expand this team':'Collapse this team'}>
+                  onContextMenu={e=>{ e.preventDefault(); setMenu({x:e.clientX, y:e.clientY}); }}
+                  title={(isCol?'Expand this team':'Collapse this team')+' · right-click for all teams'}>
                   <span className="tname">{t.n}</span>
                   <span className="thead-r">
                     {isCol && <span className="thead-pct" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</span>}
@@ -894,7 +1031,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
                 {!isCol && <>
                 <div className="urow">
                   <div className="ubig" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</div>
-                  <span className={'tag '+tagCls}>{tagTxt}</span>
+                  {diagnosis.get(t.n)
+                    ? <span className="tagwrap">
+                        <span className={'tag '+tagCls+' has-tip'}>{tagTxt}</span>
+                        <span className="tip">{diagnosis.get(t.n)}</span>
+                      </span>
+                    : <span className={'tag '+tagCls}>{tagTxt}</span>}
                 </div>
                 <div className="ucap">
                   {pinIdx!=null
@@ -922,8 +1064,22 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
                     {t.people.filter(x=>!x.leader).length} {t.people.filter(x=>!x.leader).length===1?'person':'people'}
                     <span>{openTeams.has(t.n)?'▾':'▸'}</span>
                   </button>
+                  {(teamProgs.get(t.n)||[]).length>0 && <button className="pcount" onClick={()=>toggleProgs(t.n)}
+                    title="Programmes this team is assigned to in the selected quarter">
+                    {(teamProgs.get(t.n)||[]).length} programme{(teamProgs.get(t.n)||[]).length===1?'':'s'}
+                    <span>{openProgs.has(t.n)?'▾':'▸'}</span>
+                  </button>}
                   <a className="pgo" href={PEOPLE_PAGE} target="_blank" rel="noopener noreferrer">People ↗</a>
                 </div>
+                {openProgs.has(t.n) && <ul className="plist">
+                  {(teamProgs.get(t.n)||[]).map(pp=>(
+                    <li key={pp.id||pp.name} className="prog">
+                      <a href={pp.id?programUrl(pp.id):PROGRAM_PAGE} target="_blank" rel="noopener noreferrer">{pp.name}</a>
+                      {pp.size && <span className="szt">{pp.size}</span>}
+                      <span className="wk-h">{fmt(pp.hrs)} hrs</span>
+                    </li>
+                  ))}
+                </ul>}
                 {openTeams.has(t.n) && (
                   t.people.length
                     ? <ul className="plist">
@@ -941,6 +1097,15 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
           );
         })}
       </div>}
+
+      {menu && <>
+        <div className="menu-ov" onClick={()=>setMenu(null)}
+          onContextMenu={e=>{ e.preventDefault(); setMenu(null); }}/>
+        <div className="menu" style={{left:menu.x, top:menu.y}}>
+          <button onClick={()=>{ setCollapsed(new Set()); setMenu(null); }}>Expand all teams</button>
+          <button onClick={()=>{ setCollapsed(new Set(cards.map(t=>t.n))); setMenu(null); }}>Collapse all teams</button>
+        </div>
+      </>}
 
       {undated && undated.progs.length>0 && <>
         <button className="st st-toggle" onClick={()=>toggleSection('nodate')}
