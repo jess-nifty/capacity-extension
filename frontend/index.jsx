@@ -51,6 +51,10 @@ const isOffByDefault = n => DEFAULT_OFF_COES.some(x=>norm(x)===norm(n));
 
 // Planning always opens on Q4 of the current year; other quarters are one click away.
 const PLANNING_QUARTER = 'Q4';
+// Nothing before the current planning cycle is offered. Plenty of live work runs
+// from earlier in 2026, and the part of it landing in Q4 still counts — this only
+// stops a past period being selected. Move the date when the cycle rolls on.
+const PERIOD_FLOOR = Date.UTC(2026, 9, 1);
 
 // Admin > People. The base's own formula fields link as /{base}/{pageId}/{recordId},
 // so a person's row opens directly rather than landing on an unfiltered list.
@@ -722,7 +726,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
       rows.forEach(x=>{ if(x.qk!==UNASSIGNED) s.add(x.qk); });
       progMap.forEach(pm=>{ if(!pm.test && pm.q) s.add(qKey(pm.q, pm.y)); });
     }
-    return [...s].sort((a,b)=>periodSort(a)-periodSort(b));
+    return [...s]
+      .filter(k=>{ const b = periodBounds(k); return b && b[0] >= PERIOD_FLOOR; })
+      .sort((a,b)=>periodSort(a)-periodSort(b));
   },[rows, rowWeeks, progMap, period, hasDates]);
 
   const [selQRaw, setSelQ] = useState(null);
