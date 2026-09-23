@@ -681,6 +681,34 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   // Built from the weeks work is actually scheduled in, so a period with work in it
   // is always selectable. Previously the options came from the programme's Quarter
   // tag, which meant work scheduled in an untagged period could not be reached.
+  // Spread each allocation across its working days — weekdays that are not a public
+  // holiday for that team — rather than evenly across its weeks. Dividing by weeks
+  // gave a partial week a full week's load, and gave a holiday week a full load
+  // against reduced capacity, which spiked utilisation exactly where it should dip.
+  const rowWeeks = useMemo(()=>{
+    const m = new Map();
+    rows.forEach(x=>{
+      if(x.s==null || x.e==null || x.e < x.s) return;
+      const hset = holidays ? (holidays.get(x.coe) || holidays.get('*')) : null;
+      const counts = new Map();
+      let days = 0;
+      for(let t = x.s; t <= x.e; t += DAY_MS){
+        const dow = new Date(t).getUTCDay();
+        if(dow===0 || dow===6) continue;              // weekends are not working days
+        if(hset && hset.has(t)) continue;             // nor are that team's holidays
+        days++;
+        const w = mondayOf(t);
+        counts.set(w, (counts.get(w)||0) + 1);
+      }
+      if(!days) return;
+      const perDay = x.sub/days;
+      const out = new Map();
+      counts.forEach((n,w)=>out.set(w, n*perDay));
+      m.set(x.id, out);
+    });
+    return m;
+  },[rows, holidays]);
+
   const quarterOptions = useMemo(()=>{
     const s = new Set();
     if(hasDates){
@@ -751,33 +779,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   },[selBounds]);
   const selWeekSet = useMemo(()=>new Set(selWeeks),[selWeeks]);
 
-  // Spread each allocation across its working days — weekdays that are not a public
-  // holiday for that team — rather than evenly across its weeks. Dividing by weeks
-  // gave a partial week a full week's load, and gave a holiday week a full load
-  // against reduced capacity, which spiked utilisation exactly where it should dip.
-  const rowWeeks = useMemo(()=>{
-    const m = new Map();
-    rows.forEach(x=>{
-      if(x.s==null || x.e==null || x.e < x.s) return;
-      const hset = holidays ? (holidays.get(x.coe) || holidays.get('*')) : null;
-      const counts = new Map();
-      let days = 0;
-      for(let t = x.s; t <= x.e; t += DAY_MS){
-        const dow = new Date(t).getUTCDay();
-        if(dow===0 || dow===6) continue;              // weekends are not working days
-        if(hset && hset.has(t)) continue;             // nor are that team's holidays
-        days++;
-        const w = mondayOf(t);
-        counts.set(w, (counts.get(w)||0) + 1);
-      }
-      if(!days) return;
-      const perDay = x.sub/days;
-      const out = new Map();
-      counts.forEach((n,w)=>out.set(w, n*perDay));
-      m.set(x.id, out);
-    });
-    return m;
-  },[rows, holidays]);
 
   // team -> Monday -> hours, for the weeks on screen.
   const weeklyByTeam = useMemo(()=>{
