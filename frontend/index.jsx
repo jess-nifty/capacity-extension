@@ -12,6 +12,12 @@ const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGd
              people:'fldUFFAf7b0AtmeJl'};
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
               status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h'};
+// People. Leaders are excluded from headcount and the names list: they carry no
+// working hours, so they are already absent from capacity, and counting them made
+// a team look larger than the number the capacity figure is built from.
+const PEOPLE = {table:'tblME4GTsam6VijUr', name:'fldST9rwsPokp6Q8A', coe:'fldVuBec3nj3ga9wH',
+                leader:'fldfnN3U47qdl840X'};
+
 // US Public Holidays. Each row carries a date and the CoEs that observe it, so a
 // holiday can be team-specific even though today every row links to every team.
 const HOL = {table:'tblR2HjOPhwqZwOD3', date:'fldohX95jG7q7XaET', coes:'fldvq3NifBONt5cnk'};
@@ -129,7 +135,8 @@ loadCSSFromString(`
   .cap .thead:hover .tcaret { background:var(--purple); color:#fff; }
   .cap .team.collapsed .top { padding-bottom:14px; }
   .cap .pfoot { padding:11px 14px 13px; border-top:1px solid var(--line); background:#fbfaff; }
-  .cap .prow { display:flex; align-items:center; gap:10px; }
+  .cap .prow { display:flex; align-items:center; gap:10px; font-size:11.5px; }
+  .cap .prow .pgo { margin-left:auto; }
   .cap .pfoot .plist { margin:9px 0 0; }
   .cap .pcount { border:1px solid var(--line); background:transparent; border-radius:20px; padding:3px 10px;
     font-size:11.5px; font-weight:600; color:var(--muted); display:inline-flex; align-items:center; gap:5px; }
@@ -141,6 +148,9 @@ loadCSSFromString(`
   .cap .plist li { font-size:12.5px; }
   .cap .plist a { color:var(--ink); text-decoration:none; display:block; padding:3px 5px; border-radius:5px; }
   .cap .plist a:hover { background:var(--purple-soft); color:var(--purple); }
+  .cap .plist li.lead { display:flex; align-items:baseline; gap:8px; }
+  .cap .plist li.lead a { color:var(--muted); }
+  .cap .leadtag { font-size:10.5px; color:var(--muted); font-style:italic; white-space:nowrap; }
   .cap .pnone { font-size:12px; color:var(--muted); margin:0 0 12px; }
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
   .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
@@ -389,6 +399,29 @@ function HolidayLoader({table, children}){
   return children(byTeam);
 }
 
+function PeopleLoader({table, children}){
+  const recs = useRecords(table);
+  const byTeam = useMemo(()=>{
+    const m = new Map();
+    (recs||[]).forEach(r=>{
+      const isLeader = r.getCellValue(PEOPLE.leader)===true;
+      const nm = r.getCellValueAsString(PEOPLE.name).trim();
+      (r.getCellValue(PEOPLE.coe) || []).forEach(t=>{
+        const k = String(t.name).trim();
+        const e = m.get(k) || {people:[], leaders:0};
+        e.people.push({id:r.id, name:nm, leader:isLeader});
+        if(isLeader) e.leaders++;
+        m.set(k, e);
+      });
+    });
+    // Contributors first, then leaders, each alphabetical.
+    m.forEach(v=>v.people.sort((a,b)=>
+      (a.leader?1:0)-(b.leader?1:0) || a.name.localeCompare(b.name)));
+    return m;
+  },[recs]);
+  return children(byTeam);
+}
+
 function App(){
   const base = useBase();
   const coeTable = base.getTableByIdIfExists(COE.table);
@@ -431,14 +464,18 @@ function App(){
   }
 
   const holTable = base.getTableByIdIfExists(HOL.table);
-  const dash = hols => <Dashboard coeTable={coeTable} allocTable={allocTable}
-                                  progTable={progTable} holidays={hols}/>;
+  const pplTable = base.getTableByIdIfExists(PEOPLE.table);
+  const dash = (hols, ppl) => <Dashboard coeTable={coeTable} allocTable={allocTable}
+                                         progTable={progTable} holidays={hols} peopleByTeam={ppl}/>;
+  const withPeople = hols => pplTable
+    ? <PeopleLoader table={pplTable}>{ppl=>dash(hols, ppl)}</PeopleLoader>
+    : dash(hols, null);
   return holTable
-    ? <HolidayLoader table={holTable}>{dash}</HolidayLoader>
-    : dash(null);
+    ? <HolidayLoader table={holTable}>{withPeople}</HolidayLoader>
+    : withPeople(null);
 }
 
-function Dashboard({coeTable, allocTable, progTable, holidays}){
+function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   const coeRecords = useRecords(coeTable);
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
@@ -456,12 +493,19 @@ function Dashboard({coeTable, allocTable, progTable, holidays}){
       n: r.getCellValueAsString(COE.name).trim(),
       wk100: Number(r.getCellValue(COE.wk100))||0,
       wk70: Number(r.getCellValue(COE.wk70))||0,
-      people: hasPeople
-        ? (r.getCellValue(COE.people)||[]).map(x=>({id:x.id, name:x.name}))
-            .sort((a,b)=>String(a.name).localeCompare(String(b.name)))
-        : null,
+      // Prefer the People table, which can tell a leader from a contributor. Falls
+      // back to the CoE link, which only carries names, when it is not exposed.
+      people: peopleByTeam
+        ? ((peopleByTeam.get(r.getCellValueAsString(COE.name).trim())||{}).people || [])
+        : (hasPeople
+            ? (r.getCellValue(COE.people)||[]).map(x=>({id:x.id, name:x.name}))
+                .sort((a,b)=>String(a.name).localeCompare(String(b.name)))
+            : null),
+      leaders: peopleByTeam
+        ? ((peopleByTeam.get(r.getCellValueAsString(COE.name).trim())||{}).leaders || 0)
+        : 0,
     })).filter(t=>t.n && !isExcludedCoE(t.n));
-  },[coeRecords, hasPeople]);
+  },[coeRecords, hasPeople, peopleByTeam]);
 
   // Which team cards have their people list open, and which are collapsed to a
   // single header row so a long list of teams stays scannable.
@@ -869,7 +913,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays}){
                 <div className="prow">
                   <button className="pcount" onClick={()=>toggleTeam(t.n)}
                     title={t.people.length ? 'Show the people in this team' : 'No one is linked to this team'}>
-                    {t.people.length} {t.people.length===1?'person':'people'}
+                    {t.people.filter(x=>!x.leader).length} {t.people.filter(x=>!x.leader).length===1?'person':'people'}
                     <span>{openTeams.has(t.n)?'▾':'▸'}</span>
                   </button>
                   <a className="pgo" href={PEOPLE_PAGE} target="_blank" rel="noopener noreferrer">People ↗</a>
@@ -878,8 +922,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays}){
                   t.people.length
                     ? <ul className="plist">
                         {t.people.map(pp=>(
-                          <li key={pp.id}>
+                          <li key={pp.id} className={pp.leader?'lead':''}>
                             <a href={personUrl(pp.id)} target="_blank" rel="noopener noreferrer">{pp.name}</a>
+                            {pp.leader && <span className="leadtag">not counted in capacity</span>}
                           </li>
                         ))}
                       </ul>
