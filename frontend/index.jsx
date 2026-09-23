@@ -401,7 +401,11 @@ function HolidayLoader({table, children}){
 
 function PeopleLoader({table, children}){
   const recs = useRecords(table);
+  // getCellValue throws on a field the element has not exposed, so every field is
+  // checked before any of them is read — a missing one must degrade, not crash.
+  const ready = [PEOPLE.name, PEOPLE.coe, PEOPLE.leader].every(f=>!!table.getFieldByIdIfExists(f));
   const byTeam = useMemo(()=>{
+    if(!ready) return null;
     const m = new Map();
     (recs||[]).forEach(r=>{
       const isLeader = r.getCellValue(PEOPLE.leader)===true;
@@ -418,7 +422,7 @@ function PeopleLoader({table, children}){
     m.forEach(v=>v.people.sort((a,b)=>
       (a.leader?1:0)-(b.leader?1:0) || a.name.localeCompare(b.name)));
     return m;
-  },[recs]);
+  },[recs, ready]);
   return children(byTeam);
 }
 
@@ -467,7 +471,9 @@ function App(){
   const pplTable = base.getTableByIdIfExists(PEOPLE.table);
   const dash = (hols, ppl) => <Dashboard coeTable={coeTable} allocTable={allocTable}
                                          progTable={progTable} holidays={hols} peopleByTeam={ppl}/>;
-  const withPeople = hols => pplTable
+  const pplReady = pplTable
+    && [PEOPLE.name, PEOPLE.coe, PEOPLE.leader].every(f=>!!pplTable.getFieldByIdIfExists(f));
+  const withPeople = hols => pplReady
     ? <PeopleLoader table={pplTable}>{ppl=>dash(hols, ppl)}</PeopleLoader>
     : dash(hols, null);
   return holTable
