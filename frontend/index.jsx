@@ -57,8 +57,10 @@ const PLANNING_QUARTER = 'Q4';
 const PEOPLE_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/paggbWfwyVaiQu6LH';
 const personUrl = id => PEOPLE_PAGE + '/' + id;
 
-// Programme record page, same link shape the base's own formula fields use.
-const PROGRAM_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/pagjsGM6hsHBlNbuk';
+// All Programs, in the Marketing Operations interface. The previous target was
+// "Program Detail: Wider Yahoo Team View Only", which is a read-only page for a
+// different audience.
+const PROGRAM_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/pbdNr7ZNv8saqzKeQ/pag6P2FCsWsQFIqdI';
 const programUrl = id => PROGRAM_PAGE + '/' + id;
 
 const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
@@ -81,6 +83,10 @@ loadCSSFromString(`
   .cap h1 { font-size:30px; margin:0 0 16px; letter-spacing:-.7px; }
   .cap .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:0 0 20px; }
   .cap select, .cap button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:9px; padding:7px 11px; color:var(--ink); cursor:pointer; }
+  .cap .seg { display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .cap .seg button { border:none; border-radius:0; padding:9px 14px; font-size:13px; background:transparent; }
+  .cap .seg button + button { border-left:1px solid var(--line); }
+  .cap .seg button[data-on="1"] { background:var(--purple); color:#fff; }
   .cap .dd { position:relative; }
   .cap .dd-toggle { display:inline-flex; align-items:center; gap:8px; max-width:440px; font-size:14px;
     padding:10px 14px; border-radius:10px; }
@@ -298,6 +304,21 @@ const wkRange = ms => {
   const monB = b.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'});
   return monA===monB ? dayA+'–'+dayB+' '+monB : dayA+' '+monA+' – '+dayB+' '+monB;
 };
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// "Q4 2026" or "Oct 2026", whichever unit is being filtered by.
+function periodKey(ms, mode){
+  const d = new Date(ms), y = d.getUTCFullYear(), mo = d.getUTCMonth();
+  return mode==='month' ? MONTHS[mo]+' '+y : 'Q'+(Math.floor(mo/3)+1)+' '+y;
+}
+function periodBounds(k){
+  let m = /^Q([1-4]) (\d{4})$/.exec(k);
+  if(m) return [Date.UTC(+m[2], (+m[1]-1)*3, 1), Date.UTC(+m[2], +m[1]*3, 0)];
+  m = /^([A-Za-z]{3}) (\d{4})$/.exec(k);
+  if(m){ const i = MONTHS.indexOf(m[1]); if(i>=0) return [Date.UTC(+m[2], i, 1), Date.UTC(+m[2], i+1, 0)]; }
+  return null;
+}
+const periodSort = k => { const b = periodBounds(k); return b ? b[0] : Infinity; };
 
 function qSortValue(k){
   if(k===UNASSIGNED) return Infinity;
@@ -655,34 +676,59 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
+  const [period, setPeriod] = useState('quarter');   // 'quarter' | 'month'
+
+  // Built from the weeks work is actually scheduled in, so a period with work in it
+  // is always selectable. Previously the options came from the programme's Quarter
+  // tag, which meant work scheduled in an untagged period could not be reached.
   const quarterOptions = useMemo(()=>{
-    const s = new Set(rows.map(x=>x.qk));
-    // Programs are included as well: almost none of them have allocation rows yet,
-    // so options built from allocations alone offered barely any quarters.
-    progMap.forEach(pm=>{ if(!pm.test) s.add(qKey(pm.q, pm.y)); });
-    return [...s].sort((a,b)=>(qSortValue(a)-qSortValue(b)) || a.localeCompare(b));
-  },[rows, progMap]);
+    const s = new Set();
+    if(hasDates){
+      rows.forEach(x=>{
+        if(x.isRejected) return;
+        const wm = rowWeeks.get(x.id);
+        if(wm) wm.forEach((_,w)=>s.add(periodKey(w, period)));
+      });
+    }
+    if(!s.size){                                    // no dates exposed: fall back to the tags
+      rows.forEach(x=>{ if(x.qk!==UNASSIGNED) s.add(x.qk); });
+      progMap.forEach(pm=>{ if(!pm.test && pm.q) s.add(qKey(pm.q, pm.y)); });
+    }
+    return [...s].sort((a,b)=>periodSort(a)-periodSort(b));
+  },[rows, rowWeeks, progMap, period, hasDates]);
 
   const [selQRaw, setSelQ] = useState(null);
   // Open on the quarter being planned, with every other quarter one click away in
   // the dropdown. Falls back to showing everything when that quarter has no work
   // in it, so the page can never open on an empty selection.
   const defaultQ = useMemo(()=>{
-    const q4 = qKey(PLANNING_QUARTER, String(new Date().getFullYear()));
+    const y = String(new Date().getFullYear());
+    if(period==='month'){
+      // The months of this year's planning quarter, so switching unit keeps the view.
+      const want = [9,10,11].map(i=>MONTHS[i]+' '+y).filter(k=>quarterOptions.includes(k));
+      return new Set(want.length ? want : quarterOptions.slice(0,3));
+    }
+    const q4 = PLANNING_QUARTER+' '+y;
     if(quarterOptions.includes(q4)) return new Set([q4]);
-    // No Q4 for this year in the data — fall back to any Q4, else everything, so
-    // the page never opens on an empty selection.
     const anyQ4 = quarterOptions.filter(k=>k.startsWith(PLANNING_QUARTER+' '));
     return new Set(anyQ4.length ? [anyQ4[anyQ4.length-1]] : quarterOptions);
-  },[quarterOptions]);
-  const selQ = selQRaw ?? defaultQ;
+  },[quarterOptions, period]);
+
+  // Drop any selection the current unit no longer offers, so switching between
+  // quarters and months recovers rather than emptying the page.
+  const selQ = useMemo(()=>{
+    const base = selQRaw ?? defaultQ;
+    const valid = new Set(quarterOptions);
+    const kept = [...base].filter(k=>valid.has(k));
+    return kept.length ? new Set(kept) : defaultQ;
+  },[selQRaw, defaultQ, quarterOptions]);
 
   // Capacity scales with how many real quarters are selected — "No quarter set"
   // is not a quarter and must not multiply anyone's capacity.
   const nQ = Math.max([...selQ].filter(k=>k!==UNASSIGNED).length,1);
   const inQ = k => selQ.has(k);
   // Bounds of every selected quarter, so a week can be tested against the selection.
-  const selBounds = useMemo(()=>[...selQ].map(qBounds).filter(Boolean),[selQ]);
+  const selBounds = useMemo(()=>[...selQ].map(periodBounds).filter(Boolean),[selQ]);
 
   // Hours from one allocation that land inside the selection. null = undateable.
   const hoursInSel = x => {
@@ -943,7 +989,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     <div className="cap">
       <h1>Capacity Overview</h1>
       <div className="controls">
-        <Dropdown label="Quarters" options={quarterOptions} selected={selQ}
+        <div className="seg" title="Filter by quarter or by month">
+          <button data-on={period==='quarter'?'1':'0'} onClick={()=>{setPeriod('quarter'); setSelQ(null);}}>Quarter</button>
+          <button data-on={period==='month'?'1':'0'} onClick={()=>{setPeriod('month'); setSelQ(null);}}>Month</button>
+        </div>
+        <Dropdown label={period==='month'?'Months':'Quarters'} options={quarterOptions} selected={selQ}
           onToggle={q=>setSelQ(()=>{const n=new Set(selQ); n.has(q)?n.delete(q):n.add(q); return n;})}
           onSetAll={next=>setSelQ(next)} onReset={()=>setSelQ(null)}/>
         <Dropdown label="Teams" options={teamNames} selected={selTeams}
@@ -956,7 +1006,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
       </div>
 
       <div className="ctx">
-        Showing <b>{selQ.size===0 ? 'no quarters' : [...selQ].sort((a,b)=>qSortValue(a)-qSortValue(b)).join(', ')}</b>
+        Showing <b>{selQ.size===0 ? 'nothing' : [...selQ].sort((a,b)=>periodSort(a)-periodSort(b)).join(', ')}</b>
         {' · '}<b>{shown.length}</b> of {teams.length} teams
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
