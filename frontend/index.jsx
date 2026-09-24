@@ -291,21 +291,14 @@ function mondayOf(ms){
   const back = (d.getUTCDay()+6)%7;           // Monday = 0
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()-back);
 }
-// "Q4 2026" -> the first and last instant of that quarter.
-function qBounds(k){
-  const m = /^Q([1-4]) (\d{4})$/.exec(k);
-  if(!m) return null;
-  const q = +m[1], y = +m[2];
-  return [Date.UTC(y,(q-1)*3,1), Date.UTC(y,q*3,0)];
-}
-
-const wkLabel = ms => new Date(ms).toLocaleDateString(undefined,{day:'numeric',month:'short',timeZone:'UTC'});
-// "9 – 15 Nov", or "30 Nov – 6 Dec" when the week straddles a month.
-const wkRange = ms => {
-  const a = new Date(ms), b = new Date(ms + 6*86400000);
+// "9 – 15 Nov", or "30 Nov – 6 Dec" when the range straddles a month. A single day
+// is just "1 Oct".
+const dayRange = (aMs, bMs) => {
+  const a = new Date(aMs), b = new Date(bMs);
   const dayA = a.getUTCDate(), dayB = b.getUTCDate();
   const monA = a.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'});
   const monB = b.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'});
+  if(aMs===bMs) return dayA+' '+monA;
   return monA===monB ? dayA+'–'+dayB+' '+monB : dayA+' '+monA+' – '+dayB+' '+monB;
 };
 
@@ -324,12 +317,6 @@ function periodBounds(k){
 }
 const periodSort = k => { const b = periodBounds(k); return b ? b[0] : Infinity; };
 
-function qSortValue(k){
-  if(k===UNASSIGNED) return Infinity;
-  const m = /^Q([1-4])(?: (\d{4}))?$/.exec(k);
-  if(!m) return Infinity;
-  return (m[2] ? parseInt(m[2],10) : 0)*10 + parseInt(m[1],10);
-}
 function lookupText(cell){
   if(cell==null) return null;
   if(Array.isArray(cell)){
@@ -344,10 +331,14 @@ function lookupText(cell){
 
 // One card's weekly load. Hovering reads a week out; clicking pins it as the
 // card's headline figure so it can be compared against other teams.
-function WeekChart({weeks, series, caps, noCap, pinned, onPick, scale}){
+// `spans` clips each week to the days inside the selected period, so a bar is named
+// after the days it actually charges. Without it a Q4 view labelled its first bar
+// "Sep", because the week of 28 Sep carries 1–2 Oct.
+function WeekChart({weeks, spans, widths, series, caps, noCap, pinned, onPick, scale}){
   const [hov, setHov] = useState(null);
   const show = hov!=null ? hov : pinned;
   const uu = i => (noCap || !caps[i]) ? 0 : series[i]/caps[i];
+  const label = i => dayRange(spans[i][0], spans[i][1]);
   return (
     <div className="wk">
       <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%'}}>
@@ -355,9 +346,10 @@ function WeekChart({weeks, series, caps, noCap, pinned, onPick, scale}){
         {series.map((h,i)=>(
           <span key={weeks[i]}
             className={'wk-b'+(i===pinned?' pinned':'')}
+            style={{flexGrow: widths[i]}}
             onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
             onClick={()=>onPick(i)}
-            title={wkRange(weeks[i])+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')}>
+            title={label(i)+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')}>
             <i className={h>0 ? (noCap?'grey':band(uu(i))) : 'zero'}
                style={{height: h>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '2px'}}/>
           </span>
@@ -365,14 +357,16 @@ function WeekChart({weeks, series, caps, noCap, pinned, onPick, scale}){
       </div>
       <div className="wk-ax">
         {weeks.map((w,i)=>{
-          const dt = new Date(w);
-          const newMonth = i===0 || new Date(weeks[i-1]).getUTCMonth()!==dt.getUTCMonth();
-          return <span key={w}>{newMonth ? dt.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'}) : ''}</span>;
+          // Named for the first day the bar charges, not for its Monday.
+          const dt = new Date(spans[i][0]);
+          const newMonth = i===0 || new Date(spans[i-1][0]).getUTCMonth()!==dt.getUTCMonth();
+          return <span key={w} style={{flexGrow: widths[i]}}>
+            {newMonth ? dt.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'}) : ''}</span>;
         })}
       </div>
       <div className="wk-read">
         {show!=null && series.length
-          ? <><span className="wk-wk">{wkRange(weeks[show])}</span>
+          ? <><span className="wk-wk">{label(show)}</span>
               <b>{noCap?'—':pct(uu(show))+'%'}</b>
               <span className="wk-h"> · {fmt(series[show])} hrs</span>
               {pinned!=null && hov==null && <span className="wk-pin"> pinned</span>}</>
@@ -790,6 +784,16 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     });
     return [...out].sort((x,y)=>x-y);
   },[selBounds]);
+  // Each week clipped to the days inside the selection, for labelling. A quarter
+  // rarely starts on a Monday, so the first and last bars are usually partial.
+  const weekSpans = useMemo(()=>selWeeks.map(w=>{
+    let a = null, b = null;
+    for(let d=0; d<5; d++){ const t = w + d*DAY_MS; if(!inSel(t)) continue; if(a==null) a = t; b = t; }
+    return a==null ? [w, w+4*DAY_MS] : [a, b];
+  }),[selWeeks, selBounds]);
+  // How wide each bar is drawn. A two-day boundary week given a full week's width
+  // reads as a huge week; at two fifths of the width the area is the hours again.
+  const weekWidths = useMemo(()=>selWeeks.map(selDaysInWeek),[selWeeks, selBounds]);
 
 
   // team -> Monday -> hours, for the weeks on screen.
@@ -1114,11 +1118,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
                 </div>
                 <div className="ucap">
                   {pinIdx!=null
-                    ? 'Week of '+wkRange(selWeeks[pinIdx])+' · quarter average '+(uQ==null?'—':pct(uQ)+'%')
+                    ? 'Week of '+dayRange(weekSpans[pinIdx][0], weekSpans[pinIdx][1])+' · quarter average '+(uQ==null?'—':pct(uQ)+'%')
                     : (hasDates && !series.length ? 'No dated work in this selection' : 'Quarter average')}
                 </div>
                 {hasDates && series.length>0 && <WeekChart
-                  weeks={selWeeks} series={series} caps={weekCaps} noCap={noCap}
+                  weeks={selWeeks} spans={weekSpans} widths={weekWidths}
+                  series={series} caps={weekCaps} noCap={noCap}
                   pinned={pinIdx} scale={wkScale}
                   onPick={i=>pickWeek(t.n,i)}/>}
                 </>}
