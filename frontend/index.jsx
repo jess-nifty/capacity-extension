@@ -689,25 +689,26 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   // holiday for that team — rather than evenly across its weeks. Dividing by weeks
   // gave a partial week a full week's load, and gave a holiday week a full load
   // against reduced capacity, which spiked utilisation exactly where it should dip.
-  const rowWeeks = useMemo(()=>{
+  // Hours are held per working day, not per week. Rolling them up to a Monday and
+  // then testing that Monday against the period assigned a whole boundary week to
+  // whichever quarter its Monday fell in — and a quarter rarely starts on a Monday.
+  // Q4 2026 opens on Thursday 1 October, so 1–2 Oct were being charged to Q3.
+  const rowDays = useMemo(()=>{
     const m = new Map();
     rows.forEach(x=>{
       if(x.s==null || x.e==null || x.e < x.s) return;
       const hset = holidays ? (holidays.get(x.coe) || holidays.get('*')) : null;
-      const counts = new Map();
-      let days = 0;
+      const days = [];
       for(let t = x.s; t <= x.e; t += DAY_MS){
         const dow = new Date(t).getUTCDay();
         if(dow===0 || dow===6) continue;              // weekends are not working days
         if(hset && hset.has(t)) continue;             // nor are that team's holidays
-        days++;
-        const w = mondayOf(t);
-        counts.set(w, (counts.get(w)||0) + 1);
+        days.push(t);
       }
-      if(!days) return;
-      const perDay = x.sub/days;
+      if(!days.length) return;
+      const perDay = x.sub/days.length;
       const out = new Map();
-      counts.forEach((n,w)=>out.set(w, n*perDay));
+      days.forEach(t=>out.set(t, perDay));
       m.set(x.id, out);
     });
     return m;
@@ -718,8 +719,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     if(hasDates){
       rows.forEach(x=>{
         if(x.isRejected) return;
-        const wm = rowWeeks.get(x.id);
-        if(wm) wm.forEach((_,w)=>s.add(periodKey(w, period)));
+        const dm = rowDays.get(x.id);
+        if(dm) dm.forEach((_,d)=>s.add(periodKey(d, period)));
       });
     }
     if(!s.size){                                    // no dates exposed: fall back to the tags
@@ -729,7 +730,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     return [...s]
       .filter(k=>{ const b = periodBounds(k); return b && b[0] >= PERIOD_FLOOR; })
       .sort((a,b)=>periodSort(a)-periodSort(b));
-  },[rows, rowWeeks, progMap, period, hasDates]);
+  },[rows, rowDays, progMap, period, hasDates]);
 
   const [selQRaw, setSelQ] = useState(null);
   // Open on the quarter being planned, with every other quarter one click away in
@@ -761,29 +762,34 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   // is not a quarter and must not multiply anyone's capacity.
   const nQ = Math.max([...selQ].filter(k=>k!==UNASSIGNED).length,1);
   const inQ = k => selQ.has(k);
-  // Bounds of every selected quarter, so a week can be tested against the selection.
+  // Bounds of every selected period, so a day can be tested against the selection.
   const selBounds = useMemo(()=>[...selQ].map(periodBounds).filter(Boolean),[selQ]);
+  // Membership is decided per day. Testing a week's Monday instead moved up to four
+  // working days of load across a period boundary, in either direction.
+  const inSel = ms => selBounds.some(([a,b])=>ms>=a && ms<=b);
+  // How much of a week the selection actually covers, Mon–Fri. A boundary week is
+  // worth only its own days, and the same count drives capacity, so the two agree.
+  const selDaysInWeek = w => { let n=0; for(let d=0; d<5; d++) if(inSel(w+d*DAY_MS)) n++; return n; };
 
   // Hours from one allocation that land inside the selection. null = undateable.
   const hoursInSel = x => {
     if(!hasDates) return inQ(x.qk) ? x.sub : 0;     // no dates exposed: fall back to the tag
     if(x.s==null || x.e==null || x.e < x.s) return null;
-    const wm = rowWeeks.get(x.id);
-    if(!wm) return 0;
+    const dm = rowDays.get(x.id);
+    if(!dm) return 0;
     let hit = 0;
-    selWeeks.forEach(w=>{ hit += wm.get(w)||0; });
+    dm.forEach((h,d)=>{ if(inSel(d)) hit += h; });
     return hit;
   };
 
-  // Every Monday inside the selected quarters, in order.
+  // Every week the selection touches, including the partial ones at either end.
   const selWeeks = useMemo(()=>{
     const out = new Set();
     selBounds.forEach(([a,b])=>{
-      for(let w = mondayOf(a); w <= b; w += MONDAY_MS) if(w >= a) out.add(w);
+      for(let w = mondayOf(a); w <= b; w += MONDAY_MS) if(selDaysInWeek(w) > 0) out.add(w);
     });
     return [...out].sort((x,y)=>x-y);
   },[selBounds]);
-  const selWeekSet = useMemo(()=>new Set(selWeeks),[selWeeks]);
 
 
   // team -> Monday -> hours, for the weeks on screen.
@@ -792,14 +798,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     if(!hasDates) return m;
     rows.forEach(x=>{
       if(x.isRejected) return;
-      const wm = rowWeeks.get(x.id);
-      if(!wm) return;
+      const dm = rowDays.get(x.id);
+      if(!dm) return;
       const t = m.get(x.coe) || new Map();
-      wm.forEach((h,w)=>{ if(selWeekSet.has(w)) t.set(w, (t.get(w)||0) + h); });
+      dm.forEach((h,d)=>{ if(inSel(d)){ const w = mondayOf(d); t.set(w, (t.get(w)||0) + h); } });
       m.set(x.coe, t);
     });
     return m;
-  },[rows, rowWeeks, selWeekSet, hasDates]);
+  },[rows, rowDays, selBounds, hasDates]);
 
   // Work with no dates cannot be placed in any week, so it sits outside every figure
   // above. Listed rather than dropped, because it is real committed hours.
@@ -828,15 +834,22 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
 
   // A week containing a public holiday is worth four days, not five. Capacity is
   // therefore summed week by week rather than taken as a flat 13 x weekly hours.
-  const holsInWeek = (team, weekMs) => {
-    if(!holidays) return 0;
+  const isHoliday = (team, dayMs) => {
+    if(!holidays) return false;
     const set = holidays.get(team) || holidays.get('*');
-    if(!set) return 0;
-    let n = 0;
-    for(let d=0; d<5; d++) if(set.has(weekMs + d*86400000)) n++;
-    return n;
+    return !!set && set.has(dayMs);
   };
-  const weekCapOf = (t, weekMs) => t.wk100 * (5 - holsInWeek(t.n, weekMs)) / 5;
+  // A week is worth the working days it actually contributes: days outside the
+  // selected period do not count, and neither do that team's public holidays. This
+  // is the same day set the load is spread over, so the two sides cannot drift.
+  const weekCapOf = (t, weekMs) => {
+    let n = 0;
+    for(let d=0; d<5; d++){
+      const day = weekMs + d*DAY_MS;
+      if(inSel(day) && !isHoliday(t.n, day)) n++;
+    }
+    return t.wk100 * n / 5;
+  };
   const fullCapOf = t => selWeeks.length
     ? selWeeks.reduce((a,w)=>a+weekCapOf(t,w),0)
     : t.wk100*WEEKS*nQ;                       // no dates exposed: flat quarter
@@ -847,10 +860,10 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     if(!hasDates) return m;
     rows.forEach(x=>{
       if(x.isRejected) return;
-      const wm = rowWeeks.get(x.id);
-      if(!wm) return;
+      const dm = rowDays.get(x.id);
+      if(!dm) return;
       let h = 0;
-      selWeeks.forEach(w=>{ h += wm.get(w)||0; });
+      dm.forEach((v,d)=>{ if(inSel(d)) h += v; });
       if(h<=0) return;
       const t = m.get(x.coe) || new Map();
       const k = x.pid || x.pname;
@@ -862,7 +875,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     const out = new Map();
     m.forEach((t,k)=>out.set(k, [...t.values()].sort((a,b)=>b.hrs-a.hrs)));
     return out;
-  },[rows, rowWeeks, selWeeks, hasDates]);
+  },[rows, rowDays, selBounds, hasDates]);
 
   const [openProgs, setOpenProgs] = useState(()=>new Set());
   const toggleProgs = n => setOpenProgs(prev=>{
@@ -885,13 +898,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
       let total = 0;
       rows.forEach(x=>{
         if(x.coe!==t.n || x.isRejected) return;
-        const wm = rowWeeks.get(x.id);
-        if(!wm) return;
+        const dm = rowDays.get(x.id);
+        if(!dm) return;
         let h = 0;
-        selWeeks.forEach(w=>{
-          const v = wm.get(w)||0;
-          if(v<=0) return;
+        dm.forEach((v,d)=>{
+          if(v<=0 || !inSel(d)) return;
           h += v;
+          const w = mondayOf(d);
           perWeek.set(w, (perWeek.get(w)||0) + v);
           if(!progsPerWeek.has(w)) progsPerWeek.set(w, new Set());
           progsPerWeek.get(w).add(x.pname);
@@ -947,7 +960,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
       if(parts.length) m.set(t.n, parts.slice(0,2).join(' · '));
     });
     return m;
-  },[teams, rows, rowWeeks, selWeeks, weeklyByTeam, holidays, hasDates, teamProgs]);
+  },[teams, rows, rowDays, selWeeks, selBounds, weeklyByTeam, holidays, hasDates, teamProgs]);
 
   const demandOf = name => rows.reduce((s,x)=>{
     if(x.coe!==name || x.isRejected) return s;
@@ -983,11 +996,15 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     });
     return n;
   },[progMap, selQ]);
-  const totCap = shown.reduce((s,t)=>s+t.wk70*WEEKS*nQ,0);
+  // Net of holidays and of part-weeks at the period edges, like the cards. A flat
+  // 13 x weekly hours quietly disagreed with every figure underneath it. The base's
+  // own 70% field sets the ratio, rather than assuming it is exactly 0.70.
+  const totCap = shown.reduce((s,t)=>s + fullCapOf(t)*(t.wk100 ? t.wk70/t.wk100 : 0),0);
   const totSub = shown.reduce((s,t)=>s+demandOf(t.n),0);
 
   let cards = teams.filter(t=>selTeams.has(t.n));
-  const util = t => (t.wk100>0) ? demandOf(t.n)/(t.wk100*WEEKS*nQ) : (demandOf(t.n)>0?9:0);
+  // Same denominator the card shows, so "busiest" orders by the number on screen.
+  const util = t => { const c = fullCapOf(t); return c>0 ? demandOf(t.n)/c : (demandOf(t.n)>0?9:0); };
   if(sortMode==='az') cards.sort((a,b)=>a.n.localeCompare(b.n));
   else if(sortMode==='za') cards.sort((a,b)=>b.n.localeCompare(a.n));
   else cards.sort((a,b)=>util(b)-util(a));
