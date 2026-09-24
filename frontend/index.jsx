@@ -761,10 +761,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
   // Membership is decided per day. Testing a week's Monday instead moved up to four
   // working days of load across a period boundary, in either direction.
   const inSel = ms => selBounds.some(([a,b])=>ms>=a && ms<=b);
-  // How much of a week the selection actually covers, Mon–Fri. A boundary week is
-  // worth only its own days, and the same count drives capacity, so the two agree.
-  const selDaysInWeek = w => { let n=0; for(let d=0; d<5; d++) if(inSel(w+d*DAY_MS)) n++; return n; };
-
   // Hours from one allocation that land inside the selection. null = undateable.
   const hoursInSel = x => {
     if(!hasDates) return inQ(x.qk) ? x.sub : 0;     // no dates exposed: fall back to the tag
@@ -776,24 +772,40 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     return hit;
   };
 
-  // Every week the selection touches, including the partial ones at either end.
-  const selWeeks = useMemo(()=>{
-    const out = new Set();
+  // The bars on screen, each holding the working days it charges. A period rarely
+  // starts on a Monday, and the days before that Monday are not a week of their own:
+  // Q4 opens on Thursday 1 October, so 1–2 Oct belong with the week of 5 Oct rather
+  // than in a two-day stub bar of their own labelled September. They are folded
+  // forward, and the chart then runs Oct to Dec as the quarter does.
+  const weekBuckets = useMemo(()=>{
+    const byWeek = new Map();
     selBounds.forEach(([a,b])=>{
-      for(let w = mondayOf(a); w <= b; w += MONDAY_MS) if(selDaysInWeek(w) > 0) out.add(w);
+      for(let w = mondayOf(a); w <= b; w += MONDAY_MS){
+        const key = w < a ? w + MONDAY_MS : w;     // a leading stub joins the next week
+        for(let d=0; d<5; d++){
+          const t = w + d*DAY_MS;
+          if(!inSel(t)) continue;
+          if(!byWeek.has(key)) byWeek.set(key, []);
+          byWeek.get(key).push(t);
+        }
+      }
     });
-    return [...out].sort((x,y)=>x-y);
+    return [...byWeek.entries()].sort((x,y)=>x[0]-y[0])
+      .map(([w,days])=>({w, days: days.sort((p,q)=>p-q)}));
   },[selBounds]);
-  // Each week clipped to the days inside the selection, for labelling. A quarter
-  // rarely starts on a Monday, so the first and last bars are usually partial.
-  const weekSpans = useMemo(()=>selWeeks.map(w=>{
-    let a = null, b = null;
-    for(let d=0; d<5; d++){ const t = w + d*DAY_MS; if(!inSel(t)) continue; if(a==null) a = t; b = t; }
-    return a==null ? [w, w+4*DAY_MS] : [a, b];
-  }),[selWeeks, selBounds]);
-  // How wide each bar is drawn. A two-day boundary week given a full week's width
-  // reads as a huge week; at two fifths of the width the area is the hours again.
-  const weekWidths = useMemo(()=>selWeeks.map(selDaysInWeek),[selWeeks, selBounds]);
+  const selWeeks = useMemo(()=>weekBuckets.map(b=>b.w),[weekBuckets]);
+  // Each bar named for the days it actually charges, so no month outside the
+  // selected period can appear on the axis.
+  const weekSpans = useMemo(()=>weekBuckets.map(b=>[b.days[0], b.days[b.days.length-1]]),[weekBuckets]);
+  // Width tracks the days covered, so the area of a bar is its hours. A four-day
+  // week at the end of a quarter is drawn four fifths as wide.
+  const weekWidths = useMemo(()=>weekBuckets.map(b=>b.days.length),[weekBuckets]);
+  // Which bar a given day belongs to — the fold means it is not always its Monday.
+  const bucketOfDay = useMemo(()=>{
+    const m = new Map();
+    weekBuckets.forEach(b=>b.days.forEach(d=>m.set(d, b.w)));
+    return m;
+  },[weekBuckets]);
 
 
   // team -> Monday -> hours, for the weeks on screen.
@@ -805,11 +817,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
       const dm = rowDays.get(x.id);
       if(!dm) return;
       const t = m.get(x.coe) || new Map();
-      dm.forEach((h,d)=>{ if(inSel(d)){ const w = mondayOf(d); t.set(w, (t.get(w)||0) + h); } });
+      dm.forEach((h,d)=>{ const w = bucketOfDay.get(d); if(w!=null) t.set(w, (t.get(w)||0) + h); });
       m.set(x.coe, t);
     });
     return m;
-  },[rows, rowDays, selBounds, hasDates]);
+  },[rows, rowDays, bucketOfDay, hasDates]);
 
   // Work with no dates cannot be placed in any week, so it sits outside every figure
   // above. Listed rather than dropped, because it is real committed hours.
@@ -843,19 +855,16 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
     const set = holidays.get(team) || holidays.get('*');
     return !!set && set.has(dayMs);
   };
-  // A week is worth the working days it actually contributes: days outside the
-  // selected period do not count, and neither do that team's public holidays. This
-  // is the same day set the load is spread over, so the two sides cannot drift.
-  const weekCapOf = (t, weekMs) => {
+  // A bar is worth the working days it actually holds, less that team's public
+  // holidays. It is the same day set the load is spread over, so the two sides
+  // cannot drift — and a folded seven-day bar is measured against seven days.
+  const weekCapOf = (t, bucket) => {
     let n = 0;
-    for(let d=0; d<5; d++){
-      const day = weekMs + d*DAY_MS;
-      if(inSel(day) && !isHoliday(t.n, day)) n++;
-    }
+    bucket.days.forEach(d=>{ if(!isHoliday(t.n, d)) n++; });
     return t.wk100 * n / 5;
   };
-  const fullCapOf = t => selWeeks.length
-    ? selWeeks.reduce((a,w)=>a+weekCapOf(t,w),0)
+  const fullCapOf = t => weekBuckets.length
+    ? weekBuckets.reduce((a,b)=>a+weekCapOf(t,b),0)
     : t.wk100*WEEKS*nQ;                       // no dates exposed: flat quarter
 
   // The programmes contributing to each team inside the selection.
@@ -906,9 +915,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
         if(!dm) return;
         let h = 0;
         dm.forEach((v,d)=>{
-          if(v<=0 || !inSel(d)) return;
+          const w = bucketOfDay.get(d);
+          if(v<=0 || w==null) return;
           h += v;
-          const w = mondayOf(d);
           perWeek.set(w, (perWeek.get(w)||0) + v);
           if(!progsPerWeek.has(w)) progsPerWeek.set(w, new Set());
           progsPerWeek.get(w).add(x.pname);
@@ -964,7 +973,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
       if(parts.length) m.set(t.n, parts.slice(0,2).join(' · '));
     });
     return m;
-  },[teams, rows, rowDays, selWeeks, selBounds, weeklyByTeam, holidays, hasDates, teamProgs]);
+  },[teams, rows, rowDays, weekBuckets, bucketOfDay, weeklyByTeam, holidays, hasDates, teamProgs]);
 
   const demandOf = name => rows.reduce((s,x)=>{
     if(x.coe!==name || x.isRejected) return s;
@@ -1079,7 +1088,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam}){
           // reduction still measure against the 70% allowance, which is the
           // number a lead actually plans to.
           const series = selWeeks.map(w=>(weeklyByTeam.get(t.n)||new Map()).get(w)||0);
-          const weekCaps = selWeeks.map(w=>weekCapOf(t,w));
+          const weekCaps = weekBuckets.map(b=>weekCapOf(t,b));
           const ratios = series.map((h,i)=>weekCaps[i]>0 ? h/weekCaps[i] : 0);
           const peakIdx = ratios.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
           const peakU = (noCap||!series.length) ? null : ratios[peakIdx];
