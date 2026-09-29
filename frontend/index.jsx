@@ -1150,8 +1150,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       }
       if(!who.has(team)) who.set(team, new Map());
       const w = who.get(team);
-      const cur = w.get(pp.id) || {person:pp, frac:0};
+      const cur = w.get(pp.id) || {person:pp, frac:0, lo:Infinity, hi:0, from:d, to:d};
       cur.frac += frac/days.length;           // average share across the selection
+      // The rate on the days they're actually in this team, which is what the list shows.
+      cur.lo = Math.min(cur.lo, frac); cur.hi = Math.max(cur.hi, frac);
+      cur.from = Math.min(cur.from, d); cur.to = Math.max(cur.to, d);
       w.set(pp.id, cur);
     };
     peopleList.forEach(pp=>{
@@ -1204,16 +1207,33 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const w = split.who.get(t.n) || new Map();
     const out = t.people.map(pp=>{
       const e = w.get(pp.id);
-      return {...pp, share: pp.leader ? null : (e ? e.frac : 0), guest:false};
+      return {...pp, share: pp.leader ? null : (e ? e.frac : 0), guest:false,
+              lo: e ? e.lo : 0, hi: e ? e.hi : 0, from: e ? e.from : null, to: e ? e.to : null};
     });
     const seen = new Set(t.people.map(pp=>pp.id));
     w.forEach((e,id)=>{
       if(seen.has(id)) return;
       out.push({id, name:e.person.name, leader:false, share:e.frac, guest:true,
+                lo:e.lo, hi:e.hi, from:e.from, to:e.to,
                 home:e.person.home.join(', ')});
     });
     return out.sort((a,b)=>(a.leader?1:0)-(b.leader?1:0) || a.name.localeCompare(b.name));
   };
+  // The % shown beside a name: their rate on the days they're in this team, not an
+  // average over the whole selection. A rate that changes within it shows as a range.
+  const shareLabel = pp => {
+    if(!split) return '100%';
+    if(!(pp.hi>0)) return '0%';
+    const lo = pct(pp.lo), hi = pct(pp.hi);
+    return lo===hi ? hi+'%' : lo+'–'+hi+'%';
+  };
+  const dShort = ms => new Date(ms).toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'UTC'});
+  const shareTitle = pp => {
+    if(!split) return 'Counted fully in this team.';
+    if(!(pp.hi>0)) return 'Not in this team during the selected period.';
+    return 'In this team '+dShort(pp.from)+' – '+dShort(pp.to)+'. Averages '+pct(pp.share)+'% over the selected period.';
+  };
+
   // Headcount in full-time equivalents: two people at 50% are one person's time.
   const fteOf = t => {
     const pl = peopleOf(t);
@@ -1547,14 +1567,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                             {!pp.leader && (canEditSplits && personById.has(pp.id)
                               ? <button className="sharetag" aria-expanded={editing===t.n+'|'+pp.id}
                                   onClick={()=>setEditing(editing===t.n+'|'+pp.id ? null : t.n+'|'+pp.id)}
-                                  title={(pp.guest
-                                    ? 'Lent in from '+(pp.home||'another team')+' — average share of their time across the selection'
-                                    : 'Average share of their time spent in this team across the selection')+'. Click to change their splits.'}>
-                                  {pct(split ? (pp.share ?? 0) : 1)}%</button>
-                              : <span className="sharetag" title={!split
-                                  ? 'Counted fully in this team: time splits are off on this page'
-                                  : 'Average share of their time spent in this team across the selection'}>
-                                  {pct(split ? (pp.share ?? 0) : 1)}%</span>)}
+                                  title={shareTitle(pp)+' Click to change their splits.'}>
+                                  {shareLabel(pp)}</button>
+                              : <span className="sharetag" title={shareTitle(pp)}>{shareLabel(pp)}</span>)}
                           </li>
                         ))}
                       </ul>
