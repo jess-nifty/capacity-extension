@@ -192,6 +192,37 @@ loadCSSFromString(`
   .cap .overtag { font-size:10.5px; font-weight:700; color:var(--red); background:var(--red-bg);
     border-radius:4px; padding:1px 5px; white-space:nowrap; cursor:help; }
   .cap .pnone { font-size:12px; color:var(--muted); margin:0 0 12px; }
+  .cap button.sharetag { background:none; border:0; padding:1px 4px; border-radius:4px; font:inherit; font-size:10.5px;
+    font-weight:600; color:var(--purple); cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px; }
+  .cap button.sharetag:hover, .cap button.sharetag[aria-expanded="true"] { background:var(--purple-soft); text-decoration:none; }
+  .cap .aedit { background:var(--card); border:1px solid var(--purple); border-radius:10px; padding:10px 12px; margin:0 0 12px;
+    display:flex; flex-direction:column; gap:8px; }
+  .cap .ahead { display:flex; align-items:baseline; gap:8px; font-size:12px; }
+  .cap .ahead span { flex:1; color:var(--muted); }
+  .cap .arow { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:4px 6px; font-size:12px;
+    padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .cap .arow select { min-width:0; width:100%; }
+  .cap .adates { grid-column:1 / -1; display:flex; align-items:center; gap:6px; }
+  .cap .arow select, .cap .arow input { font:inherit; font-size:12px; color:var(--ink); background:var(--card);
+    border:1px solid var(--line); border-radius:6px; padding:3px 5px; }
+  .cap .arow input[type=date] { width:118px; min-width:0; }
+  .cap .apct { display:inline-flex; align-items:center; gap:2px; color:var(--muted); }
+  .cap .apct input { width:52px; text-align:right; }
+  .cap .ato { color:var(--muted); }
+  .cap .aact { display:inline-flex; gap:4px; margin-left:auto; }
+  .cap .aadd { border-bottom:0; padding-bottom:0; }
+  .cap .aadd::before { content:"Add an assignment"; grid-column:1 / -1; font-size:11px; font-weight:600; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.4px; }
+  .cap .abtn { font:inherit; font-size:11.5px; font-weight:600; border:1px solid var(--line); background:var(--card);
+    color:var(--ink); border-radius:6px; padding:3px 8px; cursor:pointer; }
+  .cap .abtn.pri { background:var(--purple); border-color:var(--purple); color:#fff; }
+  .cap .abtn.warn { background:var(--red); border-color:var(--red); color:#fff; }
+  .cap .abtn.ghost { border-color:transparent; color:var(--muted); }
+  .cap .abtn:disabled { opacity:.5; cursor:default; }
+  .cap .anone { font-size:12px; color:var(--muted); }
+  .cap .awarn { font-size:12px; color:var(--red); background:var(--red-bg); border-radius:6px; padding:5px 8px; }
+  .cap .astat { font-size:11.5px; color:var(--green); }
+  .cap .astat.err { color:var(--red); }
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
   .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
   .cap .ucap { font-size:12px; color:var(--muted); margin-top:2px; }
@@ -440,6 +471,138 @@ function Dropdown({label, options, selected, onToggle, onSetAll, onReset}){
 
 // The holiday table is optional, and useRecords cannot take a null table, so the
 // read lives in its own component that only mounts when the table is exposed.
+// ---- Team Assignment editor ----
+// Opens under a person in a team's people list. It shows every assignment that
+// person has, not only this team's, because the rows only make sense together:
+// the home team keeps whatever share they don't lend out on a given day.
+const isoDay = ms => ms==null ? '' : new Date(ms).toISOString().slice(0,10);
+const pctIn = v => { const n = parseFloat(v); return isFinite(n) ? Math.max(0, n)/100 : null; };
+
+// The busiest day across a set of rows. Totals only rise on a start date, so
+// checking each start (and "from the beginning") finds the peak.
+function peakSplit(rows){
+  const starts = [...new Set(rows.map(r=>r.s==null ? -Infinity : r.s))];
+  let peak = 0, at = null;
+  starts.forEach(d=>{
+    const tot = rows.reduce((a,r)=>a + ((r.s==null || r.s<=d) && (r.e==null || d<=r.e) ? r.split : 0), 0);
+    if(tot > peak){ peak = tot; at = d; }
+  });
+  return {peak, at};
+}
+
+function AssignRow({row, teamOptions, table, onStatus}){
+  const [d, setD] = useState(()=>({team:row.team, pct:String(Math.round(row.split*100)), s:isoDay(row.s), e:isoDay(row.e)}));
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const dirty = d.team!==row.team || pctIn(d.pct)!==row.split || d.s!==isoDay(row.s) || d.e!==isoDay(row.e);
+  const teamId = (teamOptions.find(o=>o.name===d.team)||{}).id;
+
+  const save = async () => {
+    const split = pctIn(d.pct);
+    if(split==null){ onStatus('Enter a % between 0 and 100.', true); return; }
+    if(d.s && d.e && d.e < d.s){ onStatus('The end date is before the start date.', true); return; }
+    const fields = {[ASSIGN.coe]: teamId ? [{id:teamId}] : [], [ASSIGN.split]: split,
+                    [ASSIGN.start]: d.s || null, [ASSIGN.end]: d.e || null};
+    const chk = table.checkPermissionsForUpdateRecord(row.id, fields);
+    if(!chk.hasPermission){ onStatus(chk.reasonDisplayString, true); return; }
+    setBusy(true);
+    try { await table.updateRecordAsync(row.id, fields); onStatus('Saved', false); }
+    catch(err){ onStatus("Couldn't save: "+err.message, true); }
+    setBusy(false);
+  };
+  const remove = async () => {
+    const chk = table.checkPermissionsForDeleteRecord(row.id);
+    if(!chk.hasPermission){ onStatus(chk.reasonDisplayString, true); return; }
+    setBusy(true);
+    try { await table.deleteRecordAsync(row.id); onStatus('Removed', false); }
+    catch(err){ onStatus("Couldn't remove: "+err.message, true); setBusy(false); }
+  };
+
+  return (
+    <div className="arow">
+      <select value={d.team} onChange={e=>setD({...d, team:e.target.value})} disabled={busy} aria-label="Team">
+        {!teamId && <option value={d.team}>{d.team}</option>}
+        {teamOptions.map(o=><option key={o.id} value={o.name}>{o.name}</option>)}
+      </select>
+      <span className="apct"><input type="number" min="0" max="100" step="5" value={d.pct} disabled={busy}
+        onChange={e=>setD({...d, pct:e.target.value})} aria-label="Share of time (%)"/>%</span>
+      <div className="adates">
+      <input type="date" value={d.s} disabled={busy} onChange={e=>setD({...d, s:e.target.value})} aria-label="Start date"/>
+      <span className="ato">to</span>
+      <input type="date" value={d.e} disabled={busy} onChange={e=>setD({...d, e:e.target.value})} aria-label="End date (blank = ongoing)"
+        title="Leave blank for ongoing"/>
+      <span className="aact">
+        {dirty && <button className="abtn pri" onClick={save} disabled={busy}>Save</button>}
+        {dirty && <button className="abtn" disabled={busy}
+          onClick={()=>setD({team:row.team, pct:String(Math.round(row.split*100)), s:isoDay(row.s), e:isoDay(row.e)})}>Undo</button>}
+        {!dirty && (confirmDel
+          ? <><button className="abtn warn" onClick={remove} disabled={busy}>Remove row</button>
+              <button className="abtn" onClick={()=>setConfirmDel(false)} disabled={busy}>Keep</button></>
+          : <button className="abtn ghost" onClick={()=>setConfirmDel(true)} disabled={busy} title="Delete this assignment">✕</button>)}
+      </span>
+      </div>
+    </div>
+  );
+}
+
+function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onClose}){
+  const home = person.home.length ? person.home.join(', ') : 'no home team';
+  const firstOther = (teamOptions.find(o=>!person.home.includes(o.name))||{}).name || '';
+  const blankAdd = () => ({team: person.home.includes(cardTeam) ? firstOther : cardTeam, pct:'50', s:defaults.s, e:defaults.e});
+  const [add, setAdd] = useState(blankAdd);
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const onStatus = (msg, err) => setStatus({msg, err});
+
+  const {peak, at} = peakSplit(rows);
+  const addTeamId = (teamOptions.find(o=>o.name===add.team)||{}).id;
+  const create = async () => {
+    const split = pctIn(add.pct);
+    if(!addTeamId){ onStatus('Pick a team.', true); return; }
+    if(split==null || split<=0){ onStatus('Enter a % above 0.', true); return; }
+    if(add.s && add.e && add.e < add.s){ onStatus('The end date is before the start date.', true); return; }
+    const fields = {[ASSIGN.person]:[{id:person.id}], [ASSIGN.coe]:[{id:addTeamId}], [ASSIGN.split]:split,
+                    [ASSIGN.start]: add.s || null, [ASSIGN.end]: add.e || null};
+    const chk = table.checkPermissionsForCreateRecord(fields);
+    if(!chk.hasPermission){ onStatus(chk.reasonDisplayString, true); return; }
+    setBusy(true);
+    try { await table.createRecordAsync(fields); setAdd(blankAdd()); onStatus('Added '+add.team+' at '+Math.round(split*100)+'%', false); }
+    catch(err){ onStatus("Couldn't add: "+err.message, true); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="aedit">
+      <div className="ahead">
+        <b>{person.name}</b>
+        <span>Home: {home} keeps whatever isn't assigned below.</span>
+        <button className="abtn ghost" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      {rows.length
+        ? rows.map(r=><AssignRow key={r.id+'|'+r.team+'|'+r.split+'|'+r.s+'|'+r.e} row={r} teamOptions={teamOptions} table={table} onStatus={onStatus}/>)
+        : <div className="anone">No assignments: 100% of their time is with {home}.</div>}
+      {peak > 1.001 && <div className="awarn">
+        These rows add up to {pct(peak)}% from {at===-Infinity ? 'the start' : isoDay(at)}. Capacity scales them back to 100% until fixed.</div>}
+      <div className="arow aadd">
+        <select value={add.team} onChange={e=>setAdd({...add, team:e.target.value})} disabled={busy} aria-label="New assignment team">
+          <option value="">Team…</option>
+          {teamOptions.map(o=><option key={o.id} value={o.name}>{o.name}</option>)}
+        </select>
+        <span className="apct"><input type="number" min="0" max="100" step="5" value={add.pct} disabled={busy}
+          onChange={e=>setAdd({...add, pct:e.target.value})} aria-label="New assignment %"/>%</span>
+        <div className="adates">
+        <input type="date" value={add.s} disabled={busy} onChange={e=>setAdd({...add, s:e.target.value})} aria-label="New assignment start"/>
+        <span className="ato">to</span>
+        <input type="date" value={add.e} disabled={busy} onChange={e=>setAdd({...add, e:e.target.value})} aria-label="New assignment end (blank = ongoing)"
+          title="Leave blank for ongoing"/>
+        <span className="aact"><button className="abtn pri" onClick={create} disabled={busy}>Add</button></span>
+        </div>
+      </div>
+      {status && <div className={'astat'+(status.err?' err':'')}>{status.msg}</div>}
+    </div>
+  );
+}
+
 function HolidayLoader({table, children}){
   const recs = useRecords(table);
   const byTeam = useMemo(()=>{
@@ -564,7 +727,7 @@ function App(){
   const asgTable = base.getTableByIdIfExists(ASSIGN.table);
   const dash = (hols, ppl, list, asg) => <Dashboard coeTable={coeTable} allocTable={allocTable}
                                          progTable={progTable} holidays={hols} peopleByTeam={ppl}
-                                         peopleList={list} assignments={asg}/>;
+                                         peopleList={list} assignments={asg} asgTable={asg ? asgTable : null}/>;
   const pplReady = pplTable
     && [PEOPLE.name, PEOPLE.coe, PEOPLE.leader].every(f=>!!pplTable.getFieldByIdIfExists(f));
   // Split capacity needs every Team Assignment field; without them the page keeps
@@ -583,7 +746,7 @@ function App(){
     : withPeople(null);
 }
 
-function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peopleList, assignments}){
+function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peopleList, assignments, asgTable}){
   const base = useBase();
   // What stops time splits from being counted, named the way a builder adds it.
   const splitsOff = useMemo(()=>{
@@ -1061,6 +1224,20 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // Why a team is over: read off the data rather than asserted. Only the two
   // strongest signals are kept, so the line stays one line.
   const shortName = n => { const t = String(n||'').trim(); return t.length>30 ? t.slice(0,29)+'…' : t; };
+
+  // Which person's assignments are open for editing, per card: "team|personId".
+  const [editing, setEditing] = useState(null);
+  const teamOptions = useMemo(()=>(coeRecords||[])
+    .map(r=>({id:r.id, name:r.getCellValueAsString(COE.name).trim()}))
+    .filter(o=>o.name)
+    .sort((a,b)=>a.name.localeCompare(b.name)),[coeRecords]);
+  const personById = useMemo(()=>new Map((peopleList||[]).map(p=>[p.id,p])),[peopleList]);
+  // A new assignment defaults to the selected period, which is usually what is being planned.
+  const editDefaults = useMemo(()=>{
+    if(!selBounds.length) return {s:'', e:''};
+    return {s:isoDay(Math.min(...selBounds.map(b=>b[0]))), e:isoDay(Math.max(...selBounds.map(b=>b[1])))};
+  },[selBounds]);
+  const canEditSplits = !!(split && asgTable && peopleList);
   const diagnosis = useMemo(()=>{
     const m = new Map();
     if(!hasDates || !selWeeks.length) return m;
@@ -1345,18 +1522,36 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                             {split && split.over.has(pp.id) &&
                               <span className="overtag" title="Their Team Assignment rows add up to more than 100% on some days, so they have been scaled back to 100%">
                                 booked {pct(split.over.get(pp.id).peak)}%</span>}
-                            {!pp.leader &&
-                              <span className="sharetag" title={!split
-                                  ? 'Counted fully in this team: time splits are off on this page'
-                                  : pp.guest
+                            {!pp.leader && (canEditSplits && personById.has(pp.id)
+                              ? <button className="sharetag" aria-expanded={editing===t.n+'|'+pp.id}
+                                  onClick={()=>setEditing(editing===t.n+'|'+pp.id ? null : t.n+'|'+pp.id)}
+                                  title={(pp.guest
                                     ? 'Lent in from '+(pp.home||'another team')+' — average share of their time across the selection'
-                                    : 'Average share of their time spent in this team across the selection'}>
-                                {pct(split ? (pp.share ?? 0) : 1)}%{pp.guest?' · from '+shortName(pp.home):''}</span>}
+                                    : 'Average share of their time spent in this team across the selection')+'. Click to change their splits.'}>
+                                  {pct(pp.share ?? 0)}%{pp.guest?' · from '+shortName(pp.home):''}</button>
+                              : <span className="sharetag" title={!split
+                                  ? 'Counted fully in this team: time splits are off on this page'
+                                  : 'Average share of their time spent in this team across the selection'}>
+                                  {pct(split ? (pp.share ?? 0) : 1)}%{pp.guest?' · from '+shortName(pp.home):''}</span>)}
                           </li>
                         ))}
                       </ul>
                     : <div className="pnone">No people linked — that is why capacity is 0.</div>
                 )}
+                {openTeams.has(t.n) && canEditSplits && editing && editing.startsWith(t.n+'|')
+                  && personById.has(editing.slice(t.n.length+1)) && (()=>{
+                  const pid = editing.slice(t.n.length+1);
+                  return <AssignEditor
+                    key={pid}
+                    person={personById.get(pid)}
+                    cardTeam={t.n}
+                    rows={assignments.filter(a=>a.person===pid)
+                      .sort((a,b)=>(a.s??-Infinity)-(b.s??-Infinity) || a.team.localeCompare(b.team))}
+                    teamOptions={teamOptions}
+                    table={asgTable}
+                    defaults={editDefaults}
+                    onClose={()=>setEditing(null)}/>;
+                })()}
               </div>}
             </div>
           );
