@@ -58,6 +58,14 @@ const DEFAULT_OFF_COES = ['ASO','APAC Marketing','Brand & Marketing Research',
                           'Integrated B2B Marketing'];
 const isOffByDefault = n => DEFAULT_OFF_COES.some(x=>norm(x)===norm(n));
 
+// Teams reported as one. The combined card replaces its members everywhere on the
+// page — cards, Teams filter and totals. The base still holds them as separate CoEs,
+// so people, allocations and holidays keep linking to each one as before.
+const COMBINED = [
+  {n:'Marketing Studio (Combined)',
+   members:['Marketing Studio (Brand & Performance)','Marketing Studio (Events)']},
+];
+
 // Planning always opens on Q4 of the current year; other quarters are one click away.
 const PLANNING_QUARTER = 'Q4';
 // Nothing before the current planning cycle is offered. Plenty of live work runs
@@ -183,6 +191,8 @@ loadCSSFromString(`
   .cap .plist li.prog .wk-h { font-variant-numeric:tabular-nums; white-space:nowrap; }
   .cap .szt { font-size:10px; font-weight:700; color:var(--purple); background:var(--purple-soft);
     border-radius:4px; padding:1px 5px; }
+  .cap .team.combo { border:1.5px dashed var(--purple); }
+  .cap .combo-of { font-size:11.5px; color:var(--muted); margin:2px 0 8px; }
   .cap .leadtag { font-size:10.5px; color:var(--muted); font-style:italic; white-space:nowrap; }
   .cap .plist li.pp { display:flex; align-items:baseline; gap:8px; }
   .cap .plist li.pp a { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -800,6 +810,21 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     })).filter(t=>t.n && !isExcludedCoE(t.n));
   },[coeRecords, hasPeople, peopleByTeam]);
 
+  // The combined cards, built from whichever of their members exist. A combined
+  // card carries its member teams as `parts`; every figure below sums over them.
+  const combos = useMemo(()=>COMBINED.map(c=>{
+    const parts = c.members.map(m=>teams.find(t=>norm(t.n)===norm(m))).filter(Boolean);
+    if(parts.length<2) return null;
+    const sum = k => parts.reduce((a,p)=>a+(p[k]||0), 0);
+    return {n:c.n, parts, members:parts.map(p=>p.n), wk100:sum('wk100'), wk70:sum('wk70'),
+            people: parts.some(p=>p.people) ? parts.flatMap(p=>p.people||[]) : null,
+            leaders: sum('leaders')};
+  }).filter(Boolean),[teams]);
+  const membersOf = t => t.members || [t.n];
+  const merged = useMemo(()=>new Set(combos.flatMap(c=>c.members)),[combos]);
+  // Teams as the page presents them: combined cards in place of their members.
+  const listed = useMemo(()=>[...teams.filter(t=>!merged.has(t.n)), ...combos],[teams, combos, merged]);
+
   // Which team cards have their people list open, and which are collapsed to a
   // single header row so a long list of teams stays scannable.
   const [openTeams, setOpenTeams] = useState(()=>new Set());
@@ -829,11 +854,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   });
 
   const [selT, setSelT] = useState(null);
-  const teamNames = useMemo(()=>teams.map(t=>t.n).sort(),[teams]);
+  const teamNames = useMemo(()=>listed.map(t=>t.n).sort(),[listed]);
   // Everything except the teams that are off by default; null means "untouched",
   // so Reset drops back to this rather than to all-selected.
   const defaultTeams = useMemo(()=>new Set(teamNames.filter(n=>!isOffByDefault(n))),[teamNames]);
   const selTeams = selT ?? defaultTeams;
+  const coeSelected = coe => selTeams.has(coe)
+    || combos.some(c=>c.members.includes(coe) && selTeams.has(c.n));
 
   // Programs carries the quarter people actually set (a single-select), and it is
   // populated far more reliably than In Market Start Date — most programs have no
@@ -1075,7 +1102,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const byProg = new Map(), byTeam = new Map();
     let total = 0;
     rows.forEach(x=>{
-      if(x.isRejected || !selTeams.has(x.coe)) return;
+      if(x.isRejected || !coeSelected(x.coe)) return;
       if(!(x.s==null || x.e==null || x.e < x.s)) return;
       total += x.sub;
       byTeam.set(x.coe, (byTeam.get(x.coe)||0) + x.sub);
@@ -1091,7 +1118,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       teams: [...byTeam.entries()].sort((a,b)=>b[1]-a[1]),
       progs: [...byProg.values()].sort((a,b)=>b.hrs-a.hrs),
     };
-  },[rows, selTeams, hasDates]);
+  },[rows, selTeams, combos, hasDates]);
 
   // A week containing a public holiday is worth four days, not five. Capacity is
   // therefore summed week by week rather than taken as a flat 13 x weekly hours.
@@ -1178,7 +1205,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
   // Weekly hours as the card states them: the CoE's figure, or with splits, the
   // average week this team actually has across the selection.
-  const wkOf = t => split ? (split.gross.get(t.n)||0)*5/split.nDays : t.wk100;
+  const wkOf = t => t.parts ? t.parts.reduce((a,p)=>a+wkOf(p), 0)
+    : (split ? (split.gross.get(t.n)||0)*5/split.nDays : t.wk100);
   // The base's own 70% field sets the ratio, rather than assuming it is exactly 0.70.
   const usableOf = t => t.wk100 ? t.wk70/t.wk100 : 0.7;
 
@@ -1186,6 +1214,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // holidays. It is the same day set the load is spread over, so the two sides
   // cannot drift — and a folded seven-day bar is measured against seven days.
   const weekCapOf = (t, bucket) => {
+    if(t.parts) return t.parts.reduce((a,p)=>a+weekCapOf(p, bucket), 0);
     if(split){
       const c = split.cap.get(t.n);
       return c ? bucket.days.reduce((a,d)=>a+(c.get(d)||0), 0) : 0;
@@ -1202,6 +1231,26 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // the selection — including people lent in from other teams — plus home members
   // lent out entirely, each with their average share; leaders always stay listed.
   const peopleOf = t => {
+    if(t.parts){
+      // Someone in both teams appears once, with their shares added together.
+      const lists = t.parts.map(peopleOf);
+      if(lists.every(l=>!l)) return null;
+      const byId = new Map();
+      lists.forEach(l=>(l||[]).forEach(pp=>{
+        const cur = byId.get(pp.id);
+        if(!cur){ byId.set(pp.id, {...pp}); return; }
+        cur.leader = cur.leader || pp.leader;
+        cur.guest = cur.guest && pp.guest;
+        if(cur.share!=null && pp.share!=null) cur.share += pp.share;
+        cur.lo = (cur.lo||0) + (pp.lo||0);
+        cur.hi = (cur.hi||0) + (pp.hi||0);
+        if(pp.from!=null) cur.from = cur.from==null ? pp.from : Math.min(cur.from, pp.from);
+        if(pp.to!=null) cur.to = cur.to==null ? pp.to : Math.max(cur.to, pp.to);
+      }));
+      // Lent from one member to the other is not a guest of the pair.
+      byId.forEach(pp=>{ if(pp.guest && t.members.some(m=>String(pp.home||'').includes(m))) pp.guest = false; });
+      return [...byId.values()].sort((a,b)=>(a.leader?1:0)-(b.leader?1:0) || a.name.localeCompare(b.name));
+    }
     if(!split || !t.people) return t.people;
     const w = split.who.get(t.n) || new Map();
     const out = t.people.map(pp=>{
@@ -1263,6 +1312,20 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return out;
   },[rows, rowDays, selBounds, hasDates]);
 
+  // A combined card lists each programme once, with both teams' hours on it.
+  const progsOf = t => {
+    if(!t.parts) return teamProgs.get(t.n) || [];
+    const m = new Map();
+    t.members.forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>{
+      const k = pp.id || pp.name;
+      const cur = m.get(k) || {...pp, hrs:0};
+      cur.hrs += pp.hrs;
+      if(!cur.size && pp.size) cur.size = pp.size;
+      m.set(k, cur);
+    }));
+    return [...m.values()].sort((a,b)=>b.hrs-a.hrs);
+  };
+
   const [openProgs, setOpenProgs] = useState(()=>new Set());
   const toggleProgs = n => setOpenProgs(prev=>{
     const next = new Set(prev);
@@ -1290,14 +1353,15 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const diagnosis = useMemo(()=>{
     const m = new Map();
     if(!hasDates || !selWeeks.length) return m;
-    teams.forEach(t=>{
+    [...teams, ...combos].forEach(t=>{
       if(wkOf(t)<=0) return;
+      const ms = membersOf(t);
       const full = fullCapOf(t);
       if(full<=0) return;
       const byProg = new Map(), perWeek = new Map(), progsPerWeek = new Map();
       let total = 0;
       rows.forEach(x=>{
-        if(x.coe!==t.n || x.isRejected) return;
+        if(!ms.includes(x.coe) || x.isRejected) return;
         const dm = rowDays.get(x.id);
         if(!dm) return;
         let h = 0;
@@ -1339,7 +1403,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
       // Sizing: a wall of large programmes is a different problem from many small ones.
       if(parts.length<2){
-        const big = (teamProgs.get(t.n)||[]).filter(pp=>pp.size==='L' || pp.size==='XL');
+        const big = progsOf(t).filter(pp=>pp.size==='L' || pp.size==='XL');
         const xl = big.filter(pp=>pp.size==='XL').length, lg = big.length - xl;
         if(xl+lg >= 3){
           const bits = [];
@@ -1360,18 +1424,21 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       if(parts.length) m.set(t.n, parts.slice(0,2).join(' · '));
     });
     return m;
-  },[teams, rows, rowDays, weekBuckets, bucketOfDay, weeklyByTeam, holidays, hasDates, teamProgs, split]);
+  },[teams, combos, rows, rowDays, weekBuckets, bucketOfDay, weeklyByTeam, holidays, hasDates, teamProgs, split]);
 
-  const demandOf = name => rows.reduce((s,x)=>{
-    if(x.coe!==name || x.isRejected) return s;
-    return s + (hoursInSel(x) || 0);
-  },0);
+  const demandOf = t => {
+    const ms = membersOf(t);
+    return rows.reduce((s,x)=>{
+      if(!ms.includes(x.coe) || x.isRejected) return s;
+      return s + (hoursInSel(x) || 0);
+    },0);
+  };
 
 
   // BU table (respects team + quarter filters)
   const buAgg = {}; BU_ORDER.forEach(b=>buAgg[b]={sub:0,acc:0,crit:0});
   rows.forEach(x=>{
-    if(!selTeams.has(x.coe)) return;
+    if(!coeSelected(x.coe)) return;
     if(!buAgg[x.bu]) return; // Unassigned & others not shown
     if(x.isRejected) return;                       // Submitted = everything but Rejected
     const h = hoursInSel(x) || 0;                  // placed by date, like the cards
@@ -1381,7 +1448,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   });
   const tot = {sub:0,acc:0,crit:0}; BU_ORDER.forEach(b=>{tot.sub+=buAgg[b].sub;tot.acc+=buAgg[b].acc;tot.crit+=buAgg[b].crit;});
 
-  const shown = teams.filter(t=>selTeams.has(t.n));
+  const shown = listed.filter(t=>selTeams.has(t.n));
   // Counted from Programs, not from allocations: the overwhelming majority of live
   // programs have no Program CoE Allocation rows yet, so an allocation-derived count
   // reported a handful instead of the real figure. Submitted means every status
@@ -1400,14 +1467,23 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // 13 x weekly hours quietly disagreed with every figure underneath it. The base's
   // own 70% field sets the ratio, rather than assuming it is exactly 0.70.
   const totCap = shown.reduce((s,t)=>s + fullCapOf(t)*usableOf(t),0);
-  const totSub = shown.reduce((s,t)=>s+demandOf(t.n),0);
+  const totSub = shown.reduce((s,t)=>s+demandOf(t),0);
 
-  let cards = teams.filter(t=>selTeams.has(t.n));
+  let cards = listed.filter(t=>selTeams.has(t.n));
   // Same denominator the card shows, so "busiest" orders by the number on screen.
-  const util = t => { const c = fullCapOf(t); return c>0 ? demandOf(t.n)/c : (demandOf(t.n)>0?9:0); };
-  if(sortMode==='az') cards.sort((a,b)=>a.n.localeCompare(b.n));
-  else if(sortMode==='za') cards.sort((a,b)=>b.n.localeCompare(a.n));
-  else cards.sort((a,b)=>util(b)-util(a));
+  const util = t => { const c = fullCapOf(t); return c>0 ? demandOf(t)/c : (demandOf(t)>0?9:0); };
+  if(sortMode==='busy') cards.sort((a,b)=>util(b)-util(a));
+  else {
+    // Alphabetical, with each combined card placed straight after its members.
+    const cmp = sortMode==='az' ? (a,b)=>a.n.localeCompare(b.n) : (a,b)=>b.n.localeCompare(a.n);
+    const ordered = cards.filter(t=>!t.parts).sort(cmp);
+    cards.filter(t=>t.parts).forEach(c=>{
+      const at = Math.max(...c.members.map(m=>ordered.findIndex(t=>t.n===m)));
+      if(at>=0) ordered.splice(at+1, 0, c);
+      else { const i = ordered.findIndex(t=>cmp(c,t)<0); ordered.splice(i<0?ordered.length:i, 0, c); }
+    });
+    cards = ordered;
+  }
 
   return (
     <div className="cap">
@@ -1431,7 +1507,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
       <div className="ctx">
         Showing <b>{selQ.size===0 ? 'nothing' : [...selQ].sort((a,b)=>periodSort(a)-periodSort(b)).join(', ')}</b>
-        {' · '}<b>{shown.length}</b> of {teams.length} teams
+        {' · '}<b>{shown.length}</b> of {listed.length} teams
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
@@ -1469,13 +1545,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       </button>
       {openSections.teams && <div className="grid">
         {cards.map(t=>{
-          const wk=wkOf(t), noCap=wk===0, full=fullCapOf(t), d=demandOf(t.n);
+          const wk=wkOf(t), noCap=wk===0, full=fullCapOf(t), d=demandOf(t);
+          const progs = progsOf(t), canEdit = canEditSplits && !t.parts;
           const cap = full*usableOf(t);                  // the same 70% of a holiday-adjusted quarter
           const ppl = peopleOf(t), fte = fteOf(t);
           // Percentage and colour run off full capacity; "remaining" and the
           // reduction still measure against the 70% allowance, which is the
           // number a lead actually plans to.
-          const series = selWeeks.map(w=>(weeklyByTeam.get(t.n)||new Map()).get(w)||0);
+          const series = selWeeks.map(w=>membersOf(t).reduce((a,m)=>a+((weeklyByTeam.get(m)||new Map()).get(w)||0), 0));
           const weekCaps = weekBuckets.map(b=>weekCapOf(t,b));
           const ratios = series.map((h,i)=>weekCaps[i]>0 ? h/weekCaps[i] : 0);
           const peakIdx = ratios.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
@@ -1492,7 +1569,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
           const tagTxt = noCap?'No capacity set':(bnd==='red'?'Over threshold':bnd==='amber'?'Approaching':'Healthy');
           const isCol = collapsed.has(t.n);
           return (
-            <div className={'team'+(isCol?' collapsed':'')} key={t.n}>
+            <div className={'team'+(isCol?' collapsed':'')+(t.parts?' combo':'')} key={t.n}>
               <div className="top">
                 <button className="thead" onClick={()=>toggleCollapse(t.n)}
                   onContextMenu={e=>{ e.preventDefault(); setMenu({x:e.clientX, y:e.clientY}); }}
@@ -1504,6 +1581,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                   </span>
                 </button>
                 {!isCol && <>
+                {t.parts && <div className="combo-of">{t.members.join(' + ')}</div>}
                 <div className="urow">
                   <div className="ubig" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</div>
                   {diagnosis.get(t.n)
@@ -1540,15 +1618,15 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     {fmtHeads(fte)} {Math.abs(fte-1)<0.05?'person':'people'}
                     <span>{openTeams.has(t.n)?'▾':'▸'}</span>
                   </button>
-                  {(teamProgs.get(t.n)||[]).length>0 && <button className="pcount" onClick={()=>toggleProgs(t.n)}
+                  {progs.length>0 && <button className="pcount" onClick={()=>toggleProgs(t.n)}
                     title="Programmes this team is assigned to in the selected quarter">
-                    {(teamProgs.get(t.n)||[]).length} programme{(teamProgs.get(t.n)||[]).length===1?'':'s'}
+                    {progs.length} programme{progs.length===1?'':'s'}
                     <span>{openProgs.has(t.n)?'▾':'▸'}</span>
                   </button>}
                   <a className="pgo" href={PEOPLE_PAGE} target="_blank" rel="noopener noreferrer">People ↗</a>
                 </div>
                 {openProgs.has(t.n) && <ul className="plist">
-                  {(teamProgs.get(t.n)||[]).map(pp=>(
+                  {progs.map(pp=>(
                     <li key={pp.id||pp.name} className="prog">
                       <a href={pp.id?programUrl(pp.id):PROGRAM_PAGE} target="_blank" rel="noopener noreferrer">{pp.name}</a>
                       {pp.size && <span className="szt">{pp.size}</span>}
@@ -1563,7 +1641,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                           <li key={pp.id} className={pp.leader?'lead':'pp'}>
                             <a href={personUrl(pp.id)} target="_blank" rel="noopener noreferrer">{pp.name}</a>
                             {pp.leader && <span className="leadtag">not counted in capacity</span>}
-                            {!pp.leader && (canEditSplits && personById.has(pp.id)
+                            {!pp.leader && (canEdit && personById.has(pp.id)
                               ? <button className="sharetag" aria-expanded={editing===t.n+'|'+pp.id}
                                   onClick={()=>setEditing(editing===t.n+'|'+pp.id ? null : t.n+'|'+pp.id)}
                                   title={shareTitle(pp)+' Click to change their splits.'}>
@@ -1574,7 +1652,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                       </ul>
                     : <div className="pnone">No people linked — that is why capacity is 0.</div>
                 )}
-                {openTeams.has(t.n) && canEditSplits && editing && editing.startsWith(t.n+'|')
+                {openTeams.has(t.n) && canEdit && editing && editing.startsWith(t.n+'|')
                   && personById.has(editing.slice(t.n.length+1)) && (()=>{
                   const pid = editing.slice(t.n.length+1);
                   return <AssignEditor
