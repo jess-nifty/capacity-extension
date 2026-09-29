@@ -610,16 +610,15 @@ function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onC
         <div><b>{person.name}</b><span>Home team: {home}</span></div>
         <button className="abtn ghost" onClick={onClose} aria-label="Close" title="Close">✕</button>
       </div>
-      <div className="asec">Team assignments</div>
+      <div className="asec">Team allocation</div>
       {any && <div className="acols"><span>Team</span><span>% of time</span></div>}
       {rows.map(r=><AssignRow key={r.id+'|'+r.team+'|'+r.split+'|'+r.s+'|'+r.e} row={r} teamOptions={teamOptions} table={table} onStatus={onStatus}/>)}
       {drafts.map(d=><DraftRow key={d.key} draft={d} teamOptions={teamOptions} table={table} person={person}
         onDone={()=>dropDraft(d.key)} onStatus={onStatus}/>)}
-      {!any && <div className="anone">No assignments yet.</div>}
       {peak > 1.001 && <div className="awarn">
         Adds up to {pct(peak)}%{at===-Infinity ? '' : ' from '+new Date(at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}</div>}
       {table
-        ? <button className="aaddbtn" onClick={addDraft}>+ Add assignment</button>
+        ? <button className="aaddbtn" onClick={addDraft}>+ Add allocation</button>
         : <div className="anone">Team Assignment isn't a data source on this page, so splits can't be saved here yet.</div>}
       {status && <div className={'astat'+(status.err?' err':'')}>{status.msg}</div>}
     </div>
