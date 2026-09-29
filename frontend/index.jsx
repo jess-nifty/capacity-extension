@@ -194,8 +194,9 @@ loadCSSFromString(`
   .cap button.sharetag:hover, .cap button.sharetag[aria-expanded="true"] { background:var(--purple-soft); text-decoration:none; }
   .cap .aedit { background:var(--card); border:1px solid var(--purple); border-radius:10px; padding:10px 12px; margin:0 0 12px;
     display:flex; flex-direction:column; gap:8px; }
-  .cap .ahead { display:flex; align-items:baseline; gap:8px; font-size:12px; }
-  .cap .ahead span { flex:1; color:var(--muted); }
+  .cap .ahead { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; font-size:12px; }
+  .cap .ahead > div { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .cap .ahead span { color:var(--muted); font-size:11.5px; }
   .cap .arow { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:4px 6px; font-size:12px;
     padding-bottom:8px; border-bottom:1px solid var(--line); }
   .cap .arow select { min-width:0; width:100%; }
@@ -208,8 +209,7 @@ loadCSSFromString(`
   .cap .ato { color:var(--muted); }
   .cap .aact { display:inline-flex; gap:4px; margin-left:auto; }
   .cap .aadd { border-bottom:0; padding-bottom:0; }
-  .cap .aadd::before { content:"Add an assignment"; grid-column:1 / -1; font-size:11px; font-weight:600; color:var(--muted);
-    text-transform:uppercase; letter-spacing:.4px; }
+
   .cap .abtn { font:inherit; font-size:11.5px; font-weight:600; border:1px solid var(--line); background:var(--card);
     color:var(--ink); border-radius:6px; padding:3px 8px; cursor:pointer; }
   .cap .abtn.pri { background:var(--purple); border-color:var(--purple); color:#fff; }
@@ -571,15 +571,12 @@ function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onC
   return (
     <div className="aedit">
       <div className="ahead">
-        <b>{person.name}</b>
-        <span>Home: {home} keeps whatever isn't assigned below.</span>
+        <div><b>{person.name}</b><span>Home: {home}</span></div>
         <button className="abtn ghost" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      {rows.length
-        ? rows.map(r=><AssignRow key={r.id+'|'+r.team+'|'+r.split+'|'+r.s+'|'+r.e} row={r} teamOptions={teamOptions} table={table} onStatus={onStatus}/>)
-        : <div className="anone">No assignments: 100% of their time is with {home}.</div>}
+      {rows.map(r=><AssignRow key={r.id+'|'+r.team+'|'+r.split+'|'+r.s+'|'+r.e} row={r} teamOptions={teamOptions} table={table} onStatus={onStatus}/>)}
       {peak > 1.001 && <div className="awarn">
-        These rows add up to {pct(peak)}% from {at===-Infinity ? 'the start' : isoDay(at)}. Capacity scales them back to 100% until fixed.</div>}
+        Adds up to {pct(peak)}%{at===-Infinity ? '' : ' from '+new Date(at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}</div>}
       {!table && <div className="anone">Team Assignment isn't a data source on this page, so splits can't be saved here yet.</div>}
       {table && <div className="arow aadd">
         <select value={add.team} onChange={e=>setAdd({...add, team:e.target.value})} disabled={busy} aria-label="New assignment team">
