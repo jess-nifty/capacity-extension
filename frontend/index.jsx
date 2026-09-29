@@ -583,7 +583,8 @@ function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onC
         : <div className="anone">No assignments: 100% of their time is with {home}.</div>}
       {peak > 1.001 && <div className="awarn">
         These rows add up to {pct(peak)}% from {at===-Infinity ? 'the start' : isoDay(at)}. Capacity scales them back to 100% until fixed.</div>}
-      <div className="arow aadd">
+      {!table && <div className="anone">Team Assignment isn't a data source on this page, so splits can't be saved here yet.</div>}
+      {table && <div className="arow aadd">
         <select value={add.team} onChange={e=>setAdd({...add, team:e.target.value})} disabled={busy} aria-label="New assignment team">
           <option value="">Team…</option>
           {teamOptions.map(o=><option key={o.id} value={o.name}>{o.name}</option>)}
@@ -597,7 +598,7 @@ function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onC
           title="Leave blank for ongoing"/>
         <span className="aact"><button className="abtn pri" onClick={create} disabled={busy}>Add</button></span>
         </div>
-      </div>
+      </div>}
       {status && <div className={'astat'+(status.err?' err':'')}>{status.msg}</div>}
     </div>
   );
@@ -628,15 +629,15 @@ function PeopleLoader({table, children}){
   // checked before any of them is read — a missing one must degrade, not crash.
   const ready = [PEOPLE.name, PEOPLE.coe, PEOPLE.leader].every(f=>!!table.getFieldByIdIfExists(f));
   const hasHrs = !!table.getFieldByIdIfExists(PEOPLE.hrsDay);
-  // Everyone, with their hours and home team: capacity is built from this when
-  // Team Assignment is exposed. null when hours per day cannot be read.
+  // Everyone, with their home team and hours. hrsDay is null when the field isn't
+  // exposed; the dashboard then estimates it from the team's weekly hours.
   const list = useMemo(()=>{
-    if(!ready || !hasHrs) return null;
+    if(!ready) return null;
     return (recs||[]).map(r=>({
       id: r.id,
       name: r.getCellValueAsString(PEOPLE.name).trim(),
       leader: r.getCellValue(PEOPLE.leader)===true,
-      hrsDay: Number(r.getCellValue(PEOPLE.hrsDay))||0,
+      hrsDay: hasHrs ? Number(r.getCellValue(PEOPLE.hrsDay))||0 : null,
       home: (r.getCellValue(PEOPLE.coe)||[]).map(t=>String(t.name).trim()),
     }));
   },[recs, ready, hasHrs]);
@@ -747,17 +748,6 @@ function App(){
 }
 
 function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peopleList, assignments, asgTable}){
-  const base = useBase();
-  // What stops time splits from being counted, named the way a builder adds it.
-  const splitsOff = useMemo(()=>{
-    const miss = [];
-    if(!peopleList) miss.push('People \u2192 Working hours per day');
-    const asg = base.getTableByIdIfExists(ASSIGN.table);
-    const asgOk = asg && [ASSIGN.person, ASSIGN.coe, ASSIGN.start, ASSIGN.end, ASSIGN.split]
-      .every(f=>!!asg.getFieldByIdIfExists(f));
-    if(!asgOk) miss.push('Team Assignment');
-    return miss.join(' and ');
-  },[base, peopleList]);
   const coeRecords = useRecords(coeTable);
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
@@ -1096,6 +1086,24 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // scaled back to 100% — capacity is never invented — and the person is flagged.
   // null when Team Assignment or People hours are not exposed: every figure then
   // falls back to the CoE's weekly hours, which count each person fully at home.
+  // Each person's working hours per day. People → Working hours per day when it's
+  // exposed; otherwise their home team's weekly hours shared across its members,
+  // which adds back up to exactly the CoE figure the page used before.
+  const hoursOf = useMemo(()=>{
+    const m = new Map();
+    if(!peopleList) return m;
+    const teamWk = new Map((coeRecords||[]).map(r=>[r.getCellValueAsString(COE.name).trim(), Number(r.getCellValue(COE.wk100))||0]));
+    const heads = new Map();
+    peopleList.forEach(pp=>{ if(!pp.leader) pp.home.forEach(h=>heads.set(h, (heads.get(h)||0) + 1/pp.home.length)); });
+    peopleList.forEach(pp=>{
+      if(pp.leader){ m.set(pp.id, 0); return; }           // leaders carry no hours
+      if(pp.hrsDay!=null){ m.set(pp.id, pp.hrsDay); return; }
+      const est = pp.home.map(h=>heads.get(h) ? (teamWk.get(h)||0)/5/heads.get(h) : 0);
+      m.set(pp.id, est.length ? est.reduce((a,b)=>a+b,0)/est.length : 0);
+    });
+    return m;
+  },[peopleList, coeRecords]);
+
   const split = useMemo(()=>{
     if(!assignments || !peopleList || !weekBuckets.length) return null;
     const byPerson = new Map();
@@ -1111,7 +1119,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const over = new Map();     // person id -> {person, peak}
     const credit = (team, pp, d, frac) => {
       if(frac<=0) return;
-      const h = pp.hrsDay*frac;
+      const h = (hoursOf.get(pp.id)||0)*frac;
       gross.set(team, (gross.get(team)||0) + h);
       if(!isHoliday(team, d)){
         if(!cap.has(team)) cap.set(team, new Map());
@@ -1125,7 +1133,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       w.set(pp.id, cur);
     };
     peopleList.forEach(pp=>{
-      if(pp.hrsDay<=0) return;                // leaders carry no hours
+      if(!(hoursOf.get(pp.id)>0)) return;     // leaders carry no hours
       const mine = byPerson.get(pp.id) || [];
       days.forEach(d=>{
         const act = mine.filter(a=>(a.s==null || a.s<=d) && (a.e==null || d<=a.e));
@@ -1142,7 +1150,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       });
     });
     return {cap, gross, who, over, nDays: days.length};
-  },[assignments, peopleList, weekBuckets, holidays]);
+  },[assignments, peopleList, weekBuckets, holidays, hoursOf]);
 
   // Weekly hours as the card states them: the CoE's figure, or with splits, the
   // average week this team actually has across the selection.
@@ -1237,7 +1245,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     if(!selBounds.length) return {s:'', e:''};
     return {s:isoDay(Math.min(...selBounds.map(b=>b[0]))), e:isoDay(Math.max(...selBounds.map(b=>b[1])))};
   },[selBounds]);
-  const canEditSplits = !!(split && asgTable && peopleList);
+  const canEditSplits = !!peopleList;
   const diagnosis = useMemo(()=>{
     const m = new Map();
     if(!hasDates || !selWeeks.length) return m;
@@ -1386,7 +1394,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
-        {!split && hasDates && splitsOff && <span className="warn">{' · '}Time splits are off: add {splitsOff} as {splitsOff.includes(' and ')?'data sources':'a data source'} to count Team Assignment</span>}
         {split && split.over.size>0 && <span className="warn">{' · '}
           <a className="plain" href={ASSIGN_PAGE} target="_blank" rel="noopener noreferrer">
             {split.over.size} {split.over.size===1?'person is':'people are'} booked over 100% in Team Assignment ↗</a>
@@ -1528,7 +1535,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                                   title={(pp.guest
                                     ? 'Lent in from '+(pp.home||'another team')+' — average share of their time across the selection'
                                     : 'Average share of their time spent in this team across the selection')+'. Click to change their splits.'}>
-                                  {pct(pp.share ?? 0)}%{pp.guest?' · from '+shortName(pp.home):''}</button>
+                                  {pct(split ? (pp.share ?? 0) : 1)}%{pp.guest?' · from '+shortName(pp.home):''}</button>
                               : <span className="sharetag" title={!split
                                   ? 'Counted fully in this team: time splits are off on this page'
                                   : 'Average share of their time spent in this team across the selection'}>
@@ -1545,7 +1552,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     key={pid}
                     person={personById.get(pid)}
                     cardTeam={t.n}
-                    rows={assignments.filter(a=>a.person===pid)
+                    rows={(assignments||[]).filter(a=>a.person===pid)
                       .sort((a,b)=>(a.s??-Infinity)-(b.s??-Infinity) || a.team.localeCompare(b.team))}
                     teamOptions={teamOptions}
                     table={asgTable}
