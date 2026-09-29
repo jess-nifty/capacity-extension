@@ -584,6 +584,17 @@ function App(){
 }
 
 function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peopleList, assignments}){
+  const base = useBase();
+  // What stops time splits from being counted, named the way a builder adds it.
+  const splitsOff = useMemo(()=>{
+    const miss = [];
+    if(!peopleList) miss.push('People \u2192 Working hours per day');
+    const asg = base.getTableByIdIfExists(ASSIGN.table);
+    const asgOk = asg && [ASSIGN.person, ASSIGN.coe, ASSIGN.start, ASSIGN.end, ASSIGN.split]
+      .every(f=>!!asg.getFieldByIdIfExists(f));
+    if(!asgOk) miss.push('Team Assignment');
+    return miss.join(' and ');
+  },[base, peopleList]);
   const coeRecords = useRecords(coeTable);
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
@@ -1198,6 +1209,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
+        {!split && hasDates && splitsOff && <span className="warn">{' · '}Time splits are off: add {splitsOff} as {splitsOff.includes(' and ')?'data sources':'a data source'} to count Team Assignment</span>}
         {split && split.over.size>0 && <span className="warn">{' · '}
           <a className="plain" href={ASSIGN_PAGE} target="_blank" rel="noopener noreferrer">
             {split.over.size} {split.over.size===1?'person is':'people are'} booked over 100% in Team Assignment ↗</a>
@@ -1333,11 +1345,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                             {split && split.over.has(pp.id) &&
                               <span className="overtag" title="Their Team Assignment rows add up to more than 100% on some days, so they have been scaled back to 100%">
                                 booked {pct(split.over.get(pp.id).peak)}%</span>}
-                            {pp.share!=null && Math.abs(pp.share-1)>0.005 &&
-                              <span className="sharetag" title={pp.guest
-                                  ? 'Lent in from '+(pp.home||'another team')+' — average share of their time across the selection'
-                                  : 'Average share of their time spent in this team across the selection'}>
-                                {pct(pp.share)}%{pp.guest?' · from '+shortName(pp.home):''}</span>}
+                            {!pp.leader &&
+                              <span className="sharetag" title={!split
+                                  ? 'Counted fully in this team: time splits are off on this page'
+                                  : pp.guest
+                                    ? 'Lent in from '+(pp.home||'another team')+' — average share of their time across the selection'
+                                    : 'Average share of their time spent in this team across the selection'}>
+                                {pct(split ? (pp.share ?? 0) : 1)}%{pp.guest?' · from '+shortName(pp.home):''}</span>}
                           </li>
                         ))}
                       </ul>
