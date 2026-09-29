@@ -208,7 +208,17 @@ loadCSSFromString(`
   .cap .apct input { width:52px; text-align:right; }
   .cap .ato { color:var(--muted); }
   .cap .aact { display:inline-flex; gap:4px; margin-left:auto; }
-  .cap .aadd { border-bottom:0; padding-bottom:0; }
+  .cap .asec { font-size:11px; font-weight:700; color:var(--ink); text-transform:uppercase; letter-spacing:.5px;
+    padding-top:6px; border-top:1px solid var(--line); }
+  .cap .acols { display:grid; grid-template-columns:minmax(0,1fr) auto; font-size:10.5px; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.4px; margin-bottom:-4px; }
+  .cap .acols span:last-child { padding-right:16px; }
+  .cap .adraft { background:var(--purple-soft); border:1px dashed var(--purple); border-radius:8px; padding:6px; }
+  .cap .abtn.xbtn { border-color:var(--line); color:var(--muted); padding:3px 7px; }
+  .cap .abtn.xbtn:hover:not(:disabled) { border-color:var(--red); color:var(--red); background:var(--red-bg); }
+  .cap .aaddbtn { align-self:flex-start; font:inherit; font-size:12px; font-weight:600; color:var(--purple); background:none;
+    border:1px dashed var(--purple); border-radius:6px; padding:4px 10px; cursor:pointer; }
+  .cap .aaddbtn:hover { background:var(--purple-soft); }
 
   .cap .abtn { font:inherit; font-size:11.5px; font-weight:600; border:1px solid var(--line); background:var(--card);
     color:var(--ink); border-radius:6px; padding:3px 8px; cursor:pointer; }
@@ -533,66 +543,84 @@ function AssignRow({row, teamOptions, table, onStatus}){
         {dirty && <button className="abtn" disabled={busy}
           onClick={()=>setD({team:row.team, pct:String(Math.round(row.split*100)), s:isoDay(row.s), e:isoDay(row.e)})}>Undo</button>}
         {!dirty && (confirmDel
-          ? <><button className="abtn warn" onClick={remove} disabled={busy}>Remove row</button>
+          ? <><button className="abtn warn" onClick={remove} disabled={busy}>Remove</button>
               <button className="abtn" onClick={()=>setConfirmDel(false)} disabled={busy}>Keep</button></>
-          : <button className="abtn ghost" onClick={()=>setConfirmDel(true)} disabled={busy} title="Delete this assignment">✕</button>)}
+          : <button className="abtn xbtn" onClick={()=>setConfirmDel(true)} disabled={busy} title="Remove this assignment" aria-label="Remove this assignment">✕</button>)}
       </span>
       </div>
     </div>
   );
 }
 
-function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onClose}){
-  const home = person.home.length ? person.home.join(', ') : 'no home team';
-  const firstOther = (teamOptions.find(o=>!person.home.includes(o.name))||{}).name || '';
-  const blankAdd = () => ({team: person.home.includes(cardTeam) ? firstOther : cardTeam, pct:'50', s:defaults.s, e:defaults.e});
-  const [add, setAdd] = useState(blankAdd);
-  const [status, setStatus] = useState(null);
+// A new, unsaved row. Several can be open at once; each is saved or discarded on its own.
+function DraftRow({draft, teamOptions, table, person, onDone, onStatus}){
+  const [d, setD] = useState(draft);
   const [busy, setBusy] = useState(false);
-  const onStatus = (msg, err) => setStatus({msg, err});
-
-  const {peak, at} = peakSplit(rows);
-  const addTeamId = (teamOptions.find(o=>o.name===add.team)||{}).id;
-  const create = async () => {
-    const split = pctIn(add.pct);
-    if(!addTeamId){ onStatus('Pick a team.', true); return; }
+  const teamId = (teamOptions.find(o=>o.name===d.team)||{}).id;
+  const save = async () => {
+    const split = pctIn(d.pct);
+    if(!teamId){ onStatus('Pick a team.', true); return; }
     if(split==null || split<=0){ onStatus('Enter a % above 0.', true); return; }
-    if(add.s && add.e && add.e < add.s){ onStatus('The end date is before the start date.', true); return; }
-    const fields = {[ASSIGN.person]:[{id:person.id}], [ASSIGN.coe]:[{id:addTeamId}], [ASSIGN.split]:split,
-                    [ASSIGN.start]: add.s || null, [ASSIGN.end]: add.e || null};
+    if(d.s && d.e && d.e < d.s){ onStatus('The end date is before the start date.', true); return; }
+    const fields = {[ASSIGN.person]:[{id:person.id}], [ASSIGN.coe]:[{id:teamId}], [ASSIGN.split]:split,
+                    [ASSIGN.start]: d.s || null, [ASSIGN.end]: d.e || null};
     const chk = table.checkPermissionsForCreateRecord(fields);
     if(!chk.hasPermission){ onStatus(chk.reasonDisplayString, true); return; }
     setBusy(true);
-    try { await table.createRecordAsync(fields); setAdd(blankAdd()); onStatus('Added '+add.team+' at '+Math.round(split*100)+'%', false); }
-    catch(err){ onStatus("Couldn't add: "+err.message, true); }
-    setBusy(false);
+    try { await table.createRecordAsync(fields); onStatus('Added '+d.team+' at '+Math.round(split*100)+'%', false); onDone(); }
+    catch(err){ onStatus("Couldn't add: "+err.message, true); setBusy(false); }
   };
+  return (
+    <div className="arow adraft">
+      <select value={d.team} onChange={e=>setD({...d, team:e.target.value})} disabled={busy} aria-label="Team">
+        <option value="">Choose a team…</option>
+        {teamOptions.map(o=><option key={o.id} value={o.name}>{o.name}</option>)}
+      </select>
+      <span className="apct"><input type="number" min="0" max="100" step="5" value={d.pct} disabled={busy}
+        onChange={e=>setD({...d, pct:e.target.value})} placeholder="0" aria-label="Share of time (%)"/>%</span>
+      <div className="adates">
+        <input type="date" value={d.s} disabled={busy} onChange={e=>setD({...d, s:e.target.value})} aria-label="Start date"/>
+        <span className="ato">to</span>
+        <input type="date" value={d.e} disabled={busy} onChange={e=>setD({...d, e:e.target.value})} aria-label="End date (blank = ongoing)"
+          title="Leave blank for ongoing"/>
+        <span className="aact">
+          <button className="abtn pri" onClick={save} disabled={busy}>Save</button>
+          <button className="abtn xbtn" onClick={onDone} disabled={busy} title="Discard this new row" aria-label="Discard this new row">✕</button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onClose}){
+  const home = person.home.length ? person.home.join(', ') : 'None';
+  const [drafts, setDrafts] = useState([]);
+  const [status, setStatus] = useState(null);
+  const onStatus = (msg, err) => setStatus({msg, err});
+  // A new row starts empty apart from the dates, which default to the period in view.
+  const addDraft = () => setDrafts(ds=>[...ds, {key: Date.now()+'-'+ds.length, team:'', pct:'', s:defaults.s, e:defaults.e}]);
+  const dropDraft = key => setDrafts(ds=>ds.filter(x=>x.key!==key));
+
+  const {peak, at} = peakSplit(rows);
+  const any = rows.length + drafts.length > 0;
 
   return (
     <div className="aedit">
       <div className="ahead">
-        <div><b>{person.name}</b><span>Home: {home}</span></div>
-        <button className="abtn ghost" onClick={onClose} aria-label="Close">✕</button>
+        <div><b>{person.name}</b><span>Home team: {home}</span></div>
+        <button className="abtn ghost" onClick={onClose} aria-label="Close" title="Close">✕</button>
       </div>
+      <div className="asec">Team assignments</div>
+      {any && <div className="acols"><span>Team</span><span>% of time</span></div>}
       {rows.map(r=><AssignRow key={r.id+'|'+r.team+'|'+r.split+'|'+r.s+'|'+r.e} row={r} teamOptions={teamOptions} table={table} onStatus={onStatus}/>)}
+      {drafts.map(d=><DraftRow key={d.key} draft={d} teamOptions={teamOptions} table={table} person={person}
+        onDone={()=>dropDraft(d.key)} onStatus={onStatus}/>)}
+      {!any && <div className="anone">No assignments yet.</div>}
       {peak > 1.001 && <div className="awarn">
         Adds up to {pct(peak)}%{at===-Infinity ? '' : ' from '+new Date(at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}</div>}
-      {!table && <div className="anone">Team Assignment isn't a data source on this page, so splits can't be saved here yet.</div>}
-      {table && <div className="arow aadd">
-        <select value={add.team} onChange={e=>setAdd({...add, team:e.target.value})} disabled={busy} aria-label="New assignment team">
-          <option value="">Team…</option>
-          {teamOptions.map(o=><option key={o.id} value={o.name}>{o.name}</option>)}
-        </select>
-        <span className="apct"><input type="number" min="0" max="100" step="5" value={add.pct} disabled={busy}
-          onChange={e=>setAdd({...add, pct:e.target.value})} aria-label="New assignment %"/>%</span>
-        <div className="adates">
-        <input type="date" value={add.s} disabled={busy} onChange={e=>setAdd({...add, s:e.target.value})} aria-label="New assignment start"/>
-        <span className="ato">to</span>
-        <input type="date" value={add.e} disabled={busy} onChange={e=>setAdd({...add, e:e.target.value})} aria-label="New assignment end (blank = ongoing)"
-          title="Leave blank for ongoing"/>
-        <span className="aact"><button className="abtn pri" onClick={create} disabled={busy}>Add</button></span>
-        </div>
-      </div>}
+      {table
+        ? <button className="aaddbtn" onClick={addDraft}>+ Add assignment</button>
+        : <div className="anone">Team Assignment isn't a data source on this page, so splits can't be saved here yet.</div>}
       {status && <div className={'astat'+(status.err?' err':'')}>{status.msg}</div>}
     </div>
   );
@@ -1522,11 +1550,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                                   title={(pp.guest
                                     ? 'Lent in from '+(pp.home||'another team')+' — average share of their time across the selection'
                                     : 'Average share of their time spent in this team across the selection')+'. Click to change their splits.'}>
-                                  {pct(split ? (pp.share ?? 0) : 1)}%{pp.guest?' · from '+shortName(pp.home):''}</button>
+                                  {pct(split ? (pp.share ?? 0) : 1)}%</button>
                               : <span className="sharetag" title={!split
                                   ? 'Counted fully in this team: time splits are off on this page'
                                   : 'Average share of their time spent in this team across the selection'}>
-                                  {pct(split ? (pp.share ?? 0) : 1)}%{pp.guest?' · from '+shortName(pp.home):''}</span>)}
+                                  {pct(split ? (pp.share ?? 0) : 1)}%</span>)}
                           </li>
                         ))}
                       </ul>
