@@ -29,7 +29,6 @@ const PEOPLE = {table:'tblME4GTsam6VijUr', name:'fldST9rwsPokp6Q8A', coe:'fldVuB
 // (entering it does no harm). No End Date means ongoing; no Time Split means 100%.
 const ASSIGN = {table:'tbljJDapNeW2nR2vj', person:'fldfwIe0iGghiJPpX', coe:'fldsWvQzlCphTWRWm',
                 start:'fldMJc0lJTHzjvF01', end:'fldbtmWlHhjZ0esIn', split:'fld7Wvl0mUe0EoDGo'};
-const ASSIGN_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/tbljJDapNeW2nR2vj';
 
 // US Public Holidays. Each row carries a date and the CoEs that observe it, so a
 // holiday can be team-specific even though today every row links to every team.
@@ -189,8 +188,6 @@ loadCSSFromString(`
   .cap .plist li.pp a { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cap .sharetag { font-size:10.5px; font-weight:600; color:var(--purple); white-space:nowrap;
     font-variant-numeric:tabular-nums; cursor:help; }
-  .cap .overtag { font-size:10.5px; font-weight:700; color:var(--red); background:var(--red-bg);
-    border-radius:4px; padding:1px 5px; white-space:nowrap; cursor:help; }
   .cap .pnone { font-size:12px; color:var(--muted); margin:0 0 12px; }
   .cap button.sharetag { background:none; border:0; padding:1px 4px; border-radius:4px; font:inherit; font-size:10.5px;
     font-weight:600; color:var(--purple); cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px; }
@@ -1394,10 +1391,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
-        {split && split.over.size>0 && <span className="warn">{' · '}
-          <a className="plain" href={ASSIGN_PAGE} target="_blank" rel="noopener noreferrer">
-            {split.over.size} {split.over.size===1?'person is':'people are'} booked over 100% in Team Assignment ↗</a>
-          {' '}({[...split.over.values()].map(o=>o.person.name).sort().join(', ')}) — counted at 100% until fixed</span>}
       </div>
 
       <div className="kpis">
@@ -1526,9 +1519,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                           <li key={pp.id} className={pp.leader?'lead':'pp'}>
                             <a href={personUrl(pp.id)} target="_blank" rel="noopener noreferrer">{pp.name}</a>
                             {pp.leader && <span className="leadtag">not counted in capacity</span>}
-                            {split && split.over.has(pp.id) &&
-                              <span className="overtag" title="Their Team Assignment rows add up to more than 100% on some days, so they have been scaled back to 100%">
-                                booked {pct(split.over.get(pp.id).peak)}%</span>}
                             {!pp.leader && (canEditSplits && personById.has(pp.id)
                               ? <button className="sharetag" aria-expanded={editing===t.n+'|'+pp.id}
                                   onClick={()=>setEditing(editing===t.n+'|'+pp.id ? null : t.n+'|'+pp.id)}
