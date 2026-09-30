@@ -228,6 +228,7 @@ loadCSSFromString(`
   .cap .aaddbtn { align-self:flex-start; font:inherit; font-size:12px; font-weight:600; color:var(--purple); background:none;
     border:1px dashed var(--purple); border-radius:6px; padding:4px 10px; cursor:pointer; }
   .cap .aaddbtn:hover { background:var(--purple-soft); }
+  .cap .aadds { display:flex; gap:6px; flex-wrap:wrap; }
 
   .cap .abtn { font:inherit; font-size:11.5px; font-weight:600; border:1px solid var(--line); background:var(--card);
     color:var(--ink); border-radius:6px; padding:3px 8px; cursor:pointer; }
@@ -607,7 +608,9 @@ function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onC
   const [status, setStatus] = useState(null);
   const onStatus = (msg, err) => setStatus({msg, err});
   // A new row starts empty apart from the dates, which default to the period in view.
-  const addDraft = () => setDrafts(ds=>[...ds, {key: Date.now()+'-'+ds.length, team:'', pct:'', s:defaults.s, e:defaults.e}]);
+  const addDraft = (team='', pct='') => setDrafts(ds=>[...ds, {key: Date.now()+'-'+ds.length, team, pct, s:defaults.s, e:defaults.e}]);
+  // 0% in their home team takes their time out of the capacity for those dates.
+  const zeroHome = () => person.home.forEach(h=>addDraft(h, '0'));
   const dropDraft = key => setDrafts(ds=>ds.filter(x=>x.key!==key));
 
   const {peak, at} = peakSplit(rows);
@@ -627,7 +630,11 @@ function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onC
       {peak > 1.001 && <div className="awarn">
         Adds up to {pct(peak)}%{at===-Infinity ? '' : ' from '+new Date(at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}</div>}
       {table
-        ? <button className="aaddbtn" onClick={addDraft}>+ Add allocation</button>
+        ? <div className="aadds">
+            <button className="aaddbtn" onClick={()=>addDraft()}>+ Add allocation</button>
+            {person.home.length>0 && <button className="aaddbtn" onClick={zeroHome}
+              title={'Adds a 0% row for '+home+' — their time is taken off the capacity for those dates'}>Set to 0%</button>}
+          </div>
         : <div className="anone">Team Assignment isn't a data source on this page, so splits can't be saved here yet.</div>}
       {status && <div className={'astat'+(status.err?' err':'')}>{status.msg}</div>}
     </div>
