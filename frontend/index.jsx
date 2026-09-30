@@ -191,7 +191,6 @@ loadCSSFromString(`
   .cap .plist li.prog .wk-h { font-variant-numeric:tabular-nums; white-space:nowrap; }
   .cap .szt { font-size:10px; font-weight:700; color:var(--purple); background:var(--purple-soft);
     border-radius:4px; padding:1px 5px; }
-  .cap .team.combo { border:1.5px dashed var(--purple); }
   .cap .combo-of { font-size:11.5px; color:var(--muted); margin:2px 0 8px; }
   .cap .leadtag { font-size:10.5px; color:var(--muted); font-style:italic; white-space:nowrap; }
   .cap .plist li.pp { display:flex; align-items:baseline; gap:8px; }
