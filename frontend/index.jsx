@@ -569,7 +569,7 @@ function DraftRow({draft, teamOptions, table, person, onDone, onStatus}){
   const save = async () => {
     const split = pctIn(d.pct);
     if(!teamId){ onStatus('Pick a team.', true); return; }
-    if(split==null || split<=0){ onStatus('Enter a % above 0.', true); return; }
+    if(split==null){ onStatus('Enter a % between 0 and 100.', true); return; }
     if(d.s && d.e && d.e < d.s){ onStatus('The end date is before the start date.', true); return; }
     const fields = {[ASSIGN.person]:[{id:person.id}], [ASSIGN.coe]:[{id:teamId}], [ASSIGN.split]:split,
                     [ASSIGN.start]: d.s || null, [ASSIGN.end]: d.e || null};
@@ -1195,6 +1195,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         }
         const k = lent>1 ? 1/lent : 1;
         act.forEach(a=>credit(a.team, pp, d, a.split*k));
+        // A row for their home team sets the home share outright (0% takes them out);
+        // without one, home keeps whatever isn't lent elsewhere.
+        if(act.some(a=>pp.home.includes(a.team))) return;
         const rest = Math.max(0, 1-lent);
         pp.home.forEach(h=>credit(h, pp, d, rest/pp.home.length));
       });
