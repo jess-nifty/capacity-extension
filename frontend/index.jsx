@@ -1546,7 +1546,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       {openSections.teams && <div className="grid">
         {cards.map(t=>{
           const wk=wkOf(t), noCap=wk===0, full=fullCapOf(t), d=demandOf(t);
-          const progs = progsOf(t), canEdit = canEditSplits && !t.parts;
+          const progs = progsOf(t), canEdit = canEditSplits;
           const cap = full*usableOf(t);                  // the same 70% of a holiday-adjusted quarter
           const ppl = peopleOf(t), fte = fteOf(t);
           // Percentage and colour run off full capacity; "remaining" and the
