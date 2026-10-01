@@ -1116,7 +1116,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       const pr = byProg.get(k) || {id:x.pid, name:x.pname, hrs:0, teams:new Set(), miss:new Set()};
       pr.hrs += x.sub; pr.teams.add(x.coe);
       // Which date is actually absent — "no dates" sent people hunting for the wrong one.
-      pr.miss.add(x.s==null && x.e==null ? 'both' : (x.s==null ? 'start' : 'end'));
+      pr.miss.add(x.s==null && x.e==null ? 'both' : x.s==null ? 'start' : x.e==null ? 'end' : 'order');
       byProg.set(k, pr);
     });
     return {
@@ -1698,8 +1698,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {openSections.nodate && <>
           <div className="ctx">
             <b>{fmt(undated.total)} hrs</b> across <b>{undated.progs.length}</b> programme{undated.progs.length===1?'':'s'}
-            {' '}are missing a work date, so they cannot be placed in a week and are counted
-            nowhere above. The <b>Missing</b> column says which one. Fill it and they appear —
+            {' '}have a missing or backwards work date, so they cannot be placed in a week and are counted
+            nowhere above. The <b>Issue</b> column says which one. Fill it and they appear —
             no reload needed.
           </div>
           <div className="chips">
@@ -1708,7 +1708,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
             ))}
           </div>
           <table>
-            <thead><tr><th>Programme</th><th className="num">Hours</th><th>Missing</th><th>Teams waiting</th></tr></thead>
+            <thead><tr><th>Programme</th><th className="num">Hours</th><th>Issue</th><th>Teams waiting</th></tr></thead>
             <tbody>
               {undated.progs.map(pr=>(
                 <tr key={pr.id||pr.name}>
@@ -1717,7 +1717,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     : pr.name}</td>
                   <td className="num">{fmt(pr.hrs)}</td>
                   <td>{[...pr.miss].sort().map(m=>(
-                    <span className="miss" key={m}>{m==='both'?'start + end':'Est. Work '+m}</span>
+                    <span className="miss" key={m}>{m==='both'?'Est. Work start + end':m==='order'?'Work end before start':'Est. Work '+m}</span>
                   ))}</td>
                   <td>{[...pr.teams].sort().join(', ')}</td>
                 </tr>
