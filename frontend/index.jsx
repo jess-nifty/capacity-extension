@@ -80,8 +80,9 @@ const personUrl = id => PEOPLE_PAGE + '/' + id;
 
 // All Programs, in the Marketing Operations interface. The previous target was
 // "Program Detail: Wider Yahoo Team View Only", which is a read-only page for a
-// different audience.
-const PROGRAM_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/pbdNr7ZNv8saqzKeQ/pag6P2FCsWsQFIqdI';
+// different audience. Links are /{base}/{page}/{record}, like People: with the
+// interface ID in the path as well, Airtable answers "page not found".
+const PROGRAM_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/pag6P2FCsWsQFIqdI';
 const programUrl = id => PROGRAM_PAGE + '/' + id;
 
 const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
