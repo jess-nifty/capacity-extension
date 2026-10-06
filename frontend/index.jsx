@@ -199,7 +199,13 @@ loadCSSFromString(`
   .cap .plist li.prog { display:flex; align-items:baseline; gap:8px; }
   .cap .plist li.prog a { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cap .plist li.prog .wk-h { font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .cap table.sizes { width:100%; margin:12px 0 0; border:none; border-radius:0; background:transparent;
+  .cap .sz-toggle { display:flex; align-items:center; gap:6px; width:100%; margin:12px 0 0; padding:0;
+    background:transparent; border:none; border-radius:0; font-size:11.5px; font-weight:700; color:var(--ink);
+    text-align:left; cursor:pointer; }
+  .cap .sz-toggle span { margin-left:auto; color:var(--purple); font-size:12px; }
+  .cap .sz-toggle:hover { color:var(--purple); }
+  .cap .sz-none { font-size:11.5px; color:var(--muted); margin:6px 0 0; }
+  .cap table.sizes { width:100%; margin:6px 0 0; border:none; border-radius:0; background:transparent;
     font-size:12px; table-layout:fixed; }
   .cap table.sizes th { background:transparent; color:var(--muted); font-size:10.5px; font-weight:600;
     padding:4px 6px; border-bottom:1px solid var(--line); text-transform:none; letter-spacing:0; }
@@ -1364,17 +1370,40 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // Events sized L counts as L here even if another team sized it M. A combined
   // card sums its members, so a programme sized differently by each appears under
   // both sizes. Unsized work gets its own row rather than disappearing.
-  const sizeBreakdownOf = t => {
-    const rows = new Map();
-    membersOf(t).forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>{
-      const k = pp.size || '—';
-      const r = rows.get(k) || {size:k, progs:new Set(), hrs:0};
-      r.progs.add(pp.id || pp.name);
-      r.hrs += pp.hrs;
-      rows.set(k, r);
-    }));
-    return [...rows.values()].sort((a,b)=>(SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5));
+  // With `days` (a pinned week) it counts only those days, so the table follows
+  // the week the card is showing; without, the whole selection.
+  const sizeBreakdownOf = (t, days) => {
+    const bySize = new Map();
+    const add = (size, prog, h) => {
+      if(h<=0) return;
+      const k = size || '—';
+      const r = bySize.get(k) || {size:k, progs:new Set(), hrs:0};
+      r.progs.add(prog);
+      r.hrs += h;
+      bySize.set(k, r);
+    };
+    if(days){
+      const ms = membersOf(t), want = new Set(days);
+      rows.forEach(x=>{
+        if(x.isRejected || !ms.includes(x.coe)) return;
+        const dm = rowDays.get(x.id);
+        if(!dm) return;
+        let h = 0;
+        dm.forEach((v,d)=>{ if(want.has(d)) h += v; });
+        add(x.size, x.pid || x.pname, h);
+      });
+    } else {
+      membersOf(t).forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>add(pp.size, pp.id || pp.name, pp.hrs)));
+    }
+    return [...bySize.values()].sort((a,b)=>(SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5));
   };
+  // Size tables folded shut, by card.
+  const [closedSizes, setClosedSizes] = useState(()=>new Set());
+  const toggleSizes = n => setClosedSizes(prev=>{
+    const next = new Set(prev);
+    next.has(n) ? next.delete(n) : next.add(n);
+    return next;
+  });
 
   const [openProgs, setOpenProgs] = useState(()=>new Set());
   const toggleProgs = n => setOpenProgs(prev=>{
@@ -1519,6 +1548,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const totCap = shown.reduce((s,t)=>s + fullCapOf(t)*usableOf(t),0);
   const totSub = shown.reduce((s,t)=>s+demandOf(t),0);
 
+  // Names the period the card's figure averages over, so a month isn't called a quarter.
+  const avgLabel = period==='month'
+    ? (selQ.size>1 ? 'Average over '+selQ.size+' months' : 'Month average')
+    : (selQ.size>1 ? 'Average over '+selQ.size+' quarters' : 'Quarter average');
+
   let cards = listed.filter(t=>selTeams.has(t.n));
   // Same denominator the card shows, so "busiest" orders by the number on screen.
   const util = t => { const c = fullCapOf(t); return c>0 ? demandOf(t)/c : (demandOf(t)>0?9:0); };
@@ -1643,8 +1677,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 </div>
                 <div className="ucap">
                   {pinIdx!=null
-                    ? 'Week of '+dayRange(weekSpans[pinIdx][0], weekSpans[pinIdx][1])+' · quarter average '+(uQ==null?'—':pct(uQ)+'%')
-                    : (hasDates && !series.length ? 'No dated work in this selection' : 'Quarter average')}
+                    ? 'Week of '+dayRange(weekSpans[pinIdx][0], weekSpans[pinIdx][1])+' · '+avgLabel.toLowerCase()+' '+(uQ==null?'—':pct(uQ)+'%')
+                    : (hasDates && !series.length ? 'No dated work in this selection' : avgLabel)}
                 </div>
                 {hasDates && series.length>0 && <WeekChart
                   weeks={selWeeks} spans={weekSpans} widths={weekWidths}
@@ -1652,12 +1686,22 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                   pinned={pinIdx} scale={wkScale}
                   onPick={i=>pickWeek(t.n,i)}/>}
                 {(()=>{
-                  const sizes = sizeBreakdownOf(t);
-                  if(!sizes.length) return null;
+                  // A pinned week narrows the table to that week and its capacity,
+                  // matching the big figure above it.
+                  const wkPinned = pinIdx!=null;
+                  const sizes = sizeBreakdownOf(t, wkPinned ? weekBuckets[pinIdx].days : null);
+                  const base = wkPinned ? weekCaps[pinIdx] : full;
+                  const open = !closedSizes.has(t.n);
+                  const head = <button className="sz-toggle" onClick={()=>toggleSizes(t.n)}
+                      aria-expanded={open} title={open?'Hide the size breakdown':'Show the size breakdown'}>
+                      By size{wkPinned ? ' · week of '+dayRange(weekSpans[pinIdx][0], weekSpans[pinIdx][1]) : ''}
+                      <span>{open?'▾':'▸'}</span></button>;
+                  if(!sizes.length) return wkPinned ? <>{head}{open && <div className="sz-none">No work in this week</div>}</> : null;
+                  if(!open) return head;
                   const n = sizes.reduce((a,r)=>a+r.progs.size, 0);
                   const h = sizes.reduce((a,r)=>a+r.hrs, 0);
-                  const share = v => noCap ? '—' : (v>0 && v/full<0.005 ? '<1%' : pct(v/full)+'%');
-                  return <table className="sizes" title="% is of this team's capacity for the selected period, so the rows add up to the quarter figure">
+                  const share = v => (noCap || base<=0) ? '—' : (v>0 && v/base<0.005 ? '<1%' : pct(v/base)+'%');
+                  return <>{head}<table className="sizes" title={"% is of this team's capacity for the "+(wkPinned?'pinned week':'selected period')+", so the rows add up to the figure above"}>
                     <thead><tr><th>Size</th><th className="n">Programmes</th><th className="n">Hours</th><th className="n">%</th><th/></tr></thead>
                     <tbody>
                       {sizes.map(r=>(
@@ -1666,13 +1710,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                           <td className="n">{r.progs.size}</td>
                           <td className="n">{fmt(r.hrs)}</td>
                           <td className="n">{share(r.hrs)}</td>
-                          <td className="sbar">{!noCap && <span className="strack"><i style={{width:Math.min(100, r.hrs/full*100)+'%', background:BC[bnd==='grey'?'green':bnd]}}/></span>}</td>
+                          <td className="sbar">{!noCap && base>0 && <span className="strack"><i style={{width:Math.min(100, r.hrs/base*100)+'%', background:BC[bnd==='grey'?'green':bnd]}}/></span>}</td>
                         </tr>
                       ))}
                       <tr className="tot"><td>Total</td><td className="n">{n}</td><td className="n">{fmt(h)}</td>
-                        <td className="n" style={{color:noCap?'inherit':BC[band(h/full)]}}>{share(h)}</td><td/></tr>
+                        <td className="n" style={{color:(noCap||base<=0)?'inherit':BC[band(h/base)]}}>{share(h)}</td><td/></tr>
                     </tbody>
-                  </table>;
+                  </table></>;
                 })()}
                 </>}
               </div>
