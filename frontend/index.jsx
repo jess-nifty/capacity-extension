@@ -15,6 +15,10 @@ const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQ
               size:'fld3XLGMXBIybT2E0'};
 // Estimated Sizing rows are named "<Team> - <size>", so the size is the tail.
 const sizeOf = n => { const m = /[-–]\s*(XS|S|M|L|XL)\s*$/i.exec(String(n||'')); return m ? m[1].toUpperCase() : null; };
+// A team's programme list runs largest size first, then by hours within a size;
+// anything without a size goes last.
+const SIZE_RANK = {XL:0, L:1, M:2, S:3, XS:4};
+const bySizeThenHours = (a,b) => (SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5) || b.hrs-a.hrs;
 // People. Leaders are excluded from headcount and the names list: they carry no
 // working hours, so they are already absent from capacity, and counting them made
 // a team look larger than the number the capacity figure is built from.
@@ -1318,7 +1322,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       t.set(k, cur); m.set(x.coe, t);
     });
     const out = new Map();
-    m.forEach((t,k)=>out.set(k, [...t.values()].sort((a,b)=>b.hrs-a.hrs)));
+    m.forEach((t,k)=>out.set(k, [...t.values()].sort(bySizeThenHours)));
     return out;
   },[rows, rowDays, selBounds, hasDates]);
 
@@ -1333,7 +1337,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       if(!cur.size && pp.size) cur.size = pp.size;
       m.set(k, cur);
     }));
-    return [...m.values()].sort((a,b)=>b.hrs-a.hrs);
+    return [...m.values()].sort(bySizeThenHours);
   };
 
   const [openProgs, setOpenProgs] = useState(()=>new Set());
