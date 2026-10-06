@@ -89,7 +89,12 @@ const personUrl = id => PEOPLE_PAGE + '/' + id;
 const PROGRAM_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/pag6P2FCsWsQFIqdI';
 const programUrl = id => PROGRAM_PAGE + '/' + id;
 
-const ACCEPTED_STATUSES = new Set(['Approved to Submit Brief','Accepted - Capacity Planning']);
+// Accepted = the programme has been taken on. "Accepted - Capacity Planning" was
+// renamed "Capacity Planning" in the base and "In Production" was added after it;
+// the old name stays so history reads the same. Compared normalised, as choice
+// names in this base carry stray spaces.
+const ACCEPTED_STATUSES = new Set(['Capacity Planning','Approved to Submit Brief','In Production',
+                                   'Accepted - Capacity Planning'].map(norm));
 const REJECTED_STATUS = 'Rejected';
 
 // "Accepted & Submitted Capacity Planning" in the Marketing Operations interface.
@@ -959,7 +964,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         st,
         // Both false when Program Status isn't exposed, so every total keeps its
         // previous unfiltered behaviour rather than silently dropping to zero.
-        isAccepted: st ? ACCEPTED_STATUSES.has(st) : false,
+        isAccepted: st ? ACCEPTED_STATUSES.has(norm(st)) : false,
         isRejected: st ? st === REJECTED_STATUS : false,
         size: hasSize ? sizeOf(firstLink(r.getCellValue(ALLOC.size))?.name) : null,
         s: hasDates ? parseDate(r.getCellValue(ALLOC.start)) : null,
