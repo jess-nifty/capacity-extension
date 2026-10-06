@@ -194,6 +194,21 @@ loadCSSFromString(`
   .cap .plist li.prog { display:flex; align-items:baseline; gap:8px; }
   .cap .plist li.prog a { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cap .plist li.prog .wk-h { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .cap table.sizes { width:100%; margin:12px 0 0; border:none; border-radius:0; background:transparent;
+    font-size:12px; table-layout:fixed; }
+  .cap table.sizes th { background:transparent; color:var(--muted); font-size:10.5px; font-weight:600;
+    padding:4px 6px; border-bottom:1px solid var(--line); text-transform:none; letter-spacing:0; }
+  .cap table.sizes td { padding:4px 6px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  .cap table.sizes th:nth-child(1) { width:52px; }
+  .cap table.sizes th:nth-child(2) { width:78px; }
+  .cap table.sizes th:nth-child(3) { width:62px; }
+  .cap table.sizes th:nth-child(4) { width:40px; }
+  .cap table.sizes .n { text-align:right; }
+  .cap table.sizes tr.tot td { font-weight:700; border-bottom:none; }
+  .cap table.sizes .sbar { padding-left:10px; }
+  .cap table.sizes .strack { display:block; height:6px; border-radius:3px; background:var(--bg); overflow:hidden; }
+  .cap table.sizes .sbar i { display:block; height:6px; border-radius:3px; min-width:2px; }
+  .cap .nosz { font-size:10px; color:var(--muted); white-space:nowrap; }
   .cap .szt { font-size:10px; font-weight:700; color:var(--purple); background:var(--purple-soft);
     border-radius:4px; padding:1px 5px; }
   .cap .combo-of { font-size:11.5px; color:var(--muted); margin:2px 0 8px; }
@@ -1340,6 +1355,22 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return [...m.values()].sort(bySizeThenHours);
   };
 
+  // Hours by size inside the selection, using each team's own sizing: a programme
+  // Events sized L counts as L here even if another team sized it M. A combined
+  // card sums its members, so a programme sized differently by each appears under
+  // both sizes. Unsized work gets its own row rather than disappearing.
+  const sizeBreakdownOf = t => {
+    const rows = new Map();
+    membersOf(t).forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>{
+      const k = pp.size || '—';
+      const r = rows.get(k) || {size:k, progs:new Set(), hrs:0};
+      r.progs.add(pp.id || pp.name);
+      r.hrs += pp.hrs;
+      rows.set(k, r);
+    }));
+    return [...rows.values()].sort((a,b)=>(SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5));
+  };
+
   const [openProgs, setOpenProgs] = useState(()=>new Set());
   const toggleProgs = n => setOpenProgs(prev=>{
     const next = new Set(prev);
@@ -1615,6 +1646,29 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                   series={series} caps={weekCaps} noCap={noCap}
                   pinned={pinIdx} scale={wkScale}
                   onPick={i=>pickWeek(t.n,i)}/>}
+                {(()=>{
+                  const sizes = sizeBreakdownOf(t);
+                  if(!sizes.length) return null;
+                  const n = sizes.reduce((a,r)=>a+r.progs.size, 0);
+                  const h = sizes.reduce((a,r)=>a+r.hrs, 0);
+                  const share = v => noCap ? '—' : (v>0 && v/full<0.005 ? '<1%' : pct(v/full)+'%');
+                  return <table className="sizes" title="% is of this team's capacity for the selected period, so the rows add up to the quarter figure">
+                    <thead><tr><th>Size</th><th className="n">Programmes</th><th className="n">Hours</th><th className="n">%</th><th/></tr></thead>
+                    <tbody>
+                      {sizes.map(r=>(
+                        <tr key={r.size}>
+                          <td>{r.size==='—' ? <span className="nosz">No size</span> : <span className="szt">{r.size}</span>}</td>
+                          <td className="n">{r.progs.size}</td>
+                          <td className="n">{fmt(r.hrs)}</td>
+                          <td className="n">{share(r.hrs)}</td>
+                          <td className="sbar">{!noCap && <span className="strack"><i style={{width:Math.min(100, r.hrs/full*100)+'%', background:BC[bnd==='grey'?'green':bnd]}}/></span>}</td>
+                        </tr>
+                      ))}
+                      <tr className="tot"><td>Total</td><td className="n">{n}</td><td className="n">{fmt(h)}</td>
+                        <td className="n" style={{color:noCap?'inherit':BC[band(h/full)]}}>{share(h)}</td><td/></tr>
+                    </tbody>
+                  </table>;
+                })()}
                 </>}
               </div>
               {!isCol && <div className="metrics">
