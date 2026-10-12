@@ -12,7 +12,7 @@ const COE = {table:'tblM62hRfWTmZWM6y', name:'fldW71asl0CYBmoTo', wk100:'fldKOGd
              people:'fldUFFAf7b0AtmeJl'};
 const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQkmFAnj6WN', acc:'fldokig5iBzBNFjyO', prog:'fld86ciaUU28ftWCS', imd:'fldeEJQsoSruTVgDD',
               status:'fld02CmuABiOFdxn9', start:'fldHTdQ6cubzChPtX', end:'fldfWCXetTTTqnr7h',
-              size:'fld3XLGMXBIybT2E0'};
+              size:'fld3XLGMXBIybT2E0', type:'fldBShpMgARfxWXnl'};
 // Estimated Sizing rows are named "<Team> - <size>", so the size is the tail.
 const sizeOf = n => { const m = /[-–]\s*(XS|S|M|L|XL)\s*$/i.exec(String(n||'')); return m ? m[1].toUpperCase() : null; };
 // A team's programme list runs largest size first, then by hours within a size;
@@ -47,7 +47,14 @@ const OTHER = {table:'tblaI2Zud0SDgyLGh', name:'fld9TbS0poNyBqIql', team:'fldDOI
 const HOL = {table:'tblR2HjOPhwqZwOD3', date:'fldohX95jG7q7XaET', coes:'fldvq3NifBONt5cnk'};
 
 const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
-              quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN'};
+              quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN',
+              type:'fldtWanc3C9gK753M'};
+
+// Planned / Unplanned, on Programs; allocations carry a lookup of it. A programme
+// with neither choice set is treated as planned, the way nearly all work is.
+const TYPE_PLANNED = 'Quarterly Planned', TYPE_UNPLANNED = 'Unplanned Request';
+const TYPE_OPTIONS = [TYPE_PLANNED, TYPE_UNPLANNED];
+const isUnplanned = name => norm(name)===norm(TYPE_UNPLANNED);
 
 const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','YAds','Fantasy'];
 const WEEKS = 13;
@@ -234,6 +241,9 @@ loadCSSFromString(`
   .cap .nosz { font-size:10px; color:var(--muted); white-space:nowrap; }
   .cap .szt { font-size:10px; font-weight:700; color:var(--purple); background:var(--purple-soft);
     border-radius:4px; padding:1px 5px; }
+  .cap .unpl { font-size:10px; font-weight:700; color:#8a6100; background:#fff4d1;
+    border-radius:4px; padding:1px 5px; white-space:nowrap; }
+  .cap table.sizes tr.unp td { color:#8a6100; font-weight:600; border-bottom:none; padding-top:0; }
   .cap .combo-of { font-size:11.5px; color:var(--muted); margin:2px 0 8px; }
   .cap .leadtag { font-size:10.5px; color:var(--muted); font-style:italic; white-space:nowrap; }
   .cap .plist li.pp { display:flex; align-items:baseline; gap:8px; }
@@ -432,6 +442,8 @@ function lookupText(cell){
     if(!cell.length) return null;
     let v = cell[0];
     if(v && typeof v==='object') v = v.value ?? v.name ?? null;
+    // A lookup of a single select holds the choice object as its value.
+    if(v && typeof v==='object') v = v.name ?? null;
     return v==null ? null : String(v).trim();
   }
   if(typeof cell==='object') return (cell.name ?? cell.value ?? null);
@@ -1036,6 +1048,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const hasSize = !!allocTable.getFieldByIdIfExists(ALLOC.size);
   const hasProgStatus = !!progTable.getFieldByIdIfExists(PROG.status);
   const hasAllocStatus = !!allocTable.getFieldByIdIfExists(ALLOC.status);
+  const hasProgType = !!progTable.getFieldByIdIfExists(PROG.type);
+  const hasAllocType = !!allocTable.getFieldByIdIfExists(ALLOC.type);
+  const hasType = hasProgType || hasAllocType;
   const hasStatusField = hasProgStatus || hasAllocStatus;
 
   // program → {bu, test, crit, q, y}
@@ -1047,6 +1062,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       const qSel = hasQuarterField ? r.getCellValue(PROG.quarter) : null;
       const ySel = hasYearField ? r.getCellValue(PROG.year) : null;
       const stSel = hasProgStatus ? r.getCellValue(PROG.status) : null;
+      const tySel = hasProgType ? r.getCellValue(PROG.type) : null;
       m.set(r.id, {
         bu: buLink ? buLink.name : 'Unassigned',
         test: r.getCellValue(PROG.test)===true,
@@ -1054,13 +1070,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         q: (qSel && qSel.name) ? String(qSel.name).trim() : null,
         y: (ySel && ySel.name) ? String(ySel.name).trim() : null,
         st: (stSel && stSel.name) ? String(stSel.name).trim() : null,
+        ty: (tySel && tySel.name) ? String(tySel.name).trim() : null,
       });
     });
     return m;
-  },[progRecords, hasQuarterField, hasYearField, hasProgStatus]);
+  },[progRecords, hasQuarterField, hasYearField, hasProgStatus, hasProgType]);
 
-  // allocations → normalized rows
-  const rows = useMemo(()=>{
+  // allocations → normalized rows, before the Type filter
+  const allRows = useMemo(()=>{
     return (allocRecords||[]).map(r=>{
       const coe = firstLink(r.getCellValue(ALLOC.coe));
       const prog = firstLink(r.getCellValue(ALLOC.prog));
@@ -1093,6 +1110,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         // previous unfiltered behaviour rather than silently dropping to zero.
         isAccepted: st ? ACCEPTED_STATUSES.has(norm(st)) : false,
         isRejected: st ? st === REJECTED_STATUS : false,
+        // Same order as status: the programme's own field, then the allocation's lookup.
+        unplanned: isUnplanned((pm && pm.ty) ? pm.ty
+                    : (hasAllocType ? lookupText(r.getCellValue(ALLOC.type)) : null)),
         size: hasSize ? sizeOf(firstLink(r.getCellValue(ALLOC.size))?.name) : null,
         s: hasDates ? parseDate(r.getCellValue(ALLOC.start)) : null,
         e: hasDates ? parseDate(r.getCellValue(ALLOC.end)) : null,
@@ -1100,7 +1120,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
     // ^ programmes with Testing Programs ticked are excluded here, and so is any
     //   allocation whose programme the extension cannot see.
-  },[allocRecords, progMap, hasAllocStatus, hasDates, hasSize]);
+  },[allocRecords, progMap, hasAllocStatus, hasAllocType, hasDates, hasSize]);
+
+  // Type filter. Everything below reads `rows`, so cards, totals, the timeline and
+  // the business-unit table all follow it. Periods and day spreads are built from
+  // every row, so switching type never takes a quarter out of the list.
+  const [selTy, setSelTy] = useState(()=>new Set(TYPE_OPTIONS));
+  const rows = useMemo(()=>(!hasType || selTy.size===TYPE_OPTIONS.length) ? allRows
+    : allRows.filter(x=>selTy.has(x.unplanned ? TYPE_UNPLANNED : TYPE_PLANNED)),[allRows, selTy, hasType]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -1119,7 +1146,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // Q4 2026 opens on Thursday 1 October, so 1–2 Oct were being charged to Q3.
   const rowDays = useMemo(()=>{
     const m = new Map();
-    rows.forEach(x=>{
+    allRows.forEach(x=>{
       if(x.s==null || x.e==null || x.e < x.s) return;
       const hset = holidays ? (holidays.get(x.coe) || holidays.get('*')) : null;
       const days = [];
@@ -1136,25 +1163,25 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       m.set(x.id, out);
     });
     return m;
-  },[rows, holidays]);
+  },[allRows, holidays]);
 
   const quarterOptions = useMemo(()=>{
     const s = new Set();
     if(hasDates){
-      rows.forEach(x=>{
+      allRows.forEach(x=>{
         if(x.isRejected) return;
         const dm = rowDays.get(x.id);
         if(dm) dm.forEach((_,d)=>s.add(periodKey(d, period)));
       });
     }
     if(!s.size){                                    // no dates exposed: fall back to the tags
-      rows.forEach(x=>{ if(x.qk!==UNASSIGNED) s.add(x.qk); });
+      allRows.forEach(x=>{ if(x.qk!==UNASSIGNED) s.add(x.qk); });
       progMap.forEach(pm=>{ if(!pm.test && pm.q) s.add(qKey(pm.q, pm.y)); });
     }
     return [...s]
       .filter(k=>{ const b = periodBounds(k); return b && b[0] >= PERIOD_FLOOR; })
       .sort((a,b)=>periodSort(a)-periodSort(b));
-  },[rows, rowDays, progMap, period, hasDates]);
+  },[allRows, rowDays, progMap, period, hasDates]);
 
   const [selQRaw, setSelQ] = useState(null);
   // Open on the quarter being planned, with every other quarter one click away in
@@ -1481,7 +1508,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       if(h<=0) return;
       const t = m.get(x.coe) || new Map();
       const k = x.pid || x.pname;
-      const cur = t.get(k) || {id:x.pid, name:x.pname, hrs:0, size:x.size};
+      const cur = t.get(k) || {id:x.pid, name:x.pname, hrs:0, size:x.size, unplanned:x.unplanned};
       cur.hrs += h;
       if(!cur.size && x.size) cur.size = x.size;
       t.set(k, cur); m.set(x.coe, t);
@@ -1511,10 +1538,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // both sizes. Unsized work gets its own row rather than disappearing.
   // With `days` (a pinned week) it counts only those days, so the table follows
   // the week the card is showing; without, the whole selection.
+  // The result also carries `unplanned`: how many of those hours are Unplanned Requests.
   const sizeBreakdownOf = (t, days) => {
     const bySize = new Map();
-    const add = (size, prog, h) => {
+    let unp = 0;
+    const add = (size, prog, h, unplanned) => {
       if(h<=0) return;
+      if(unplanned) unp += h;
       const k = size || '—';
       const r = bySize.get(k) || {size:k, progs:new Set(), hrs:0};
       r.progs.add(prog);
@@ -1529,12 +1559,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         if(!dm) return;
         let h = 0;
         dm.forEach((v,d)=>{ if(want.has(d)) h += v; });
-        add(x.size, x.pid || x.pname, h);
+        add(x.size, x.pid || x.pname, h, x.unplanned);
       });
     } else {
-      membersOf(t).forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>add(pp.size, pp.id || pp.name, pp.hrs)));
+      membersOf(t).forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>add(pp.size, pp.id || pp.name, pp.hrs, pp.unplanned)));
     }
-    return [...bySize.values()].sort((a,b)=>(SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5));
+    const out = [...bySize.values()].sort((a,b)=>(SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5));
+    out.unplanned = unp;
+    return out;
   };
   // Size tables folded shut, by card.
   const [closedSizes, setClosedSizes] = useState(()=>new Set());
@@ -1726,6 +1758,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         <Dropdown label="Teams" options={teamNames} selected={selTeams}
           onToggle={t=>setSelT(()=>{const n=new Set(selTeams); n.has(t)?n.delete(t):n.add(t); return n;})}
           onSetAll={next=>setSelT(next)} onReset={()=>setSelT(null)}/>
+        {hasType && <Dropdown label="Type" options={TYPE_OPTIONS} selected={selTy}
+          onToggle={o=>setSelTy(()=>{const n=new Set(selTy); n.has(o)?n.delete(o):n.add(o); return n;})}
+          onSetAll={next=>setSelTy(next)} onReset={()=>setSelTy(new Set(TYPE_OPTIONS))}/>}
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
@@ -1735,6 +1770,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       <div className="ctx">
         Showing <b>{selQ.size===0 ? 'nothing' : [...selQ].sort((a,b)=>periodSort(a)-periodSort(b)).join(', ')}</b>
         {' · '}<b>{shown.length}</b> of {listed.length} teams
+        {hasType && selTy.size<TYPE_OPTIONS.length && <>{' · '}<b>{selTy.size ? [...selTy].join(', ') + ' only' : 'no type selected'}</b></>}
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
@@ -1858,6 +1894,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                       ))}
                       <tr className="tot"><td>Total</td><td className="n">{n}</td><td className="n">{fmt(h)}</td>
                         <td className="n" style={{color:(noCap||base<=0)?'inherit':BC[band(h/base)]}}>{share(h)}</td><td/></tr>
+                      {sizes.unplanned>0.5 && <tr className="unp" title="Hours from programmes marked Unplanned Request">
+                        <td colSpan={2}>of which unplanned</td><td className="n">{fmt(sizes.unplanned)}</td>
+                        <td className="n">{share(sizes.unplanned)}</td><td/></tr>}
                     </tbody>
                   </table></>;
                 })()}
@@ -1904,6 +1943,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     <li key={pp.id||pp.name} className="prog">
                       <a href={pp.id?programUrl(pp.id):PROGRAM_PAGE} target="_blank" rel="noopener noreferrer">{pp.name}</a>
                       {pp.size && <span className="szt">{pp.size}</span>}
+                      {pp.unplanned && <span className="unpl" title="Unplanned Request">Unplanned</span>}
                       <span className="wk-h">{fmt(pp.hrs)} hrs</span>
                     </li>
                   ))}
