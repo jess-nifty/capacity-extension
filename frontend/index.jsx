@@ -334,11 +334,11 @@ loadCSSFromString(`
   .cap .bar { height:8px; border-radius:6px; background:#eee; margin:12px 0 4px; overflow:hidden; position:relative; }
   .cap .bar > i { display:block; height:100%; border-radius:6px; }
   .cap .bar .tgt { position:absolute; top:-3px; bottom:-3px; width:2px; background:#3a2f74; opacity:.55; left:70%; }
-  .cap .metrics { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border-top:1px solid var(--line); }
-  .cap .metrics div { background:#fff; padding:10px 14px; }
-  .cap .metrics .k { font-size:11px; color:var(--muted); }
-  .cap .metrics .v { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:1px; }
-  .cap .metrics .v small { font-size:11px; font-weight:500; color:var(--muted); }
+  .cap .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border-top:1px solid var(--line); }
+  .cap .metrics > div { background:#fff; padding:5px 10px; min-width:0; }
+  .cap .metrics .k { font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cap .metrics .v { font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .cap .metrics .v small { font-size:10px; font-weight:500; color:var(--muted); }
   .cap .tag { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.4px; }
   .cap .t-green{background:var(--green-bg);color:var(--green);} .cap .t-amber{background:var(--amber-bg);color:var(--amber);}
   .cap .t-red{background:var(--red-bg);color:var(--red);} .cap .t-grey{background:#eee;color:#777;}
@@ -1919,12 +1919,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 </>}
               </div>
               {!isCol && <div className="metrics">
-                <div><div className="k">Working hrs / quarter {holidays?'(net of holidays)':'(100%)'}</div><div className="v">{fmt(full)}</div></div>
-                <div><div className="k">Usable / quarter (70%)</div><div className="v">{fmt(cap)} <small>hrs</small></div></div>
-                <div><div className="k">Submitted hrs</div><div className="v">{fmt(d)}</div></div>
-                <div><div className="k">Hrs remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
-                <div><div className="k">Reduction to hit 70%</div><div className="v" style={{color:red>0?'var(--red)':'var(--green)'}}>{red>0?fmt(red)+' hrs':'None'}</div></div>
-                <div><div className="k">Working hrs / week{split?' (avg)':''}</div><div className="v">{fmt(wk)} <small>/ 70%: {fmt(wk*usableOf(t))}</small></div></div>
+                {/* Short labels to keep the grid tight; the full meaning is on hover. */}
+                <div title={'Working hours in the selection, 100% of capacity'+(holidays?', net of holidays':'')}><div className="k">Working hrs</div><div className="v">{fmt(full)}</div></div>
+                <div title="Usable hours in the selection: 70% of working hours"><div className="k">Usable (70%)</div><div className="v">{fmt(cap)}</div></div>
+                <div title="Programme hours submitted in the selection (excludes Other work)"><div className="k">Submitted</div><div className="v">{fmt(d)}</div></div>
+                <div title="Usable hours minus submitted hours and Other work"><div className="k">Remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
+                <div title="Hours to cut to bring the load down to 70%"><div className="k">Cut to 70%</div><div className="v" style={{color:red>0?'var(--red)':'var(--green)'}}>{red>0?fmt(red):'None'}</div></div>
+                <div title={'Working hours per week'+(split?', averaged over the selection':'')+' · 70%: '+fmt(wk*usableOf(t))}><div className="k">Hrs / week{split?' (avg)':''}</div><div className="v">{fmt(wk)} <small>/ {fmt(wk*usableOf(t))}</small></div></div>
               </div>}
               {!isCol && othTable && (()=>{
                 const mine = membersOf(t).flatMap(m=>othersOf(m).map(o=>({...o, team:m})));
