@@ -216,7 +216,9 @@ loadCSSFromString(`
   .cap .plist li.lead { display:flex; align-items:baseline; gap:8px; }
   .cap .plist li.lead a { color:var(--muted); }
   .cap .plist li.prog { display:flex; align-items:baseline; gap:8px; }
-  .cap .plist li.prog a { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .plist li.prog a { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cap .plist li.prog .pend { margin-left:auto; display:inline-flex; align-items:baseline; gap:8px; flex-shrink:0; }
+  .cap .plist li.prog .unpl { flex-shrink:0; }
   .cap .plist li.prog .wk-h { font-variant-numeric:tabular-nums; white-space:nowrap; }
   .cap .sz-toggle { display:flex; align-items:center; gap:6px; width:100%; margin:12px 0 0; padding:0;
     background:transparent; border:none; border-radius:0; font-size:11.5px; font-weight:700; color:var(--ink);
@@ -1941,10 +1943,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 {openProgs.has(t.n) && <ul className="plist">
                   {progs.map(pp=>(
                     <li key={pp.id||pp.name} className="prog">
-                      {pp.unplanned && <span className="unpl" title="Unplanned Request">Unplanned</span>}
                       <a href={pp.id?programUrl(pp.id):PROGRAM_PAGE} target="_blank" rel="noopener noreferrer" title={pp.name}>{pp.name}</a>
-                      {pp.size && <span className="szt">{pp.size}</span>}
-                      <span className="wk-h">{fmt(pp.hrs)} hrs</span>
+                      {pp.unplanned && <span className="unpl" title="Unplanned Request">Unplanned</span>}
+                      <span className="pend">
+                        {pp.size && <span className="szt">{pp.size}</span>}
+                        <span className="wk-h">{fmt(pp.hrs)} hrs</span>
+                      </span>
                     </li>
                   ))}
                 </ul>}
