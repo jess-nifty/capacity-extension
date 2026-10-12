@@ -771,7 +771,7 @@ function OtherEditor({rows, teams, table, defaults}){
   const addDraft = () => setDrafts(ds=>[...ds, {key: Date.now()+'-'+ds.length}]);
   const dropDraft = key => setDrafts(ds=>ds.filter(x=>x.key!==key));
   return <>
-    <div className="ahint">Hours set aside for work outside programmes, e.g. BAU or admin. That share comes off the team's capacity on those dates.</div>
+    <div className="ahint">Standing work outside programmes, e.g. BAU or admin. That share of the team's hours counts as load on those dates, and programmes are added on top.</div>
     {rows.map(r=><OtherRow key={r.id+'|'+r.name+'|'+r.team+'|'+r.pct+'|'+r.s+'|'+r.e} row={r} teams={teams} table={table} onStatus={onStatus}/>)}
     {drafts.map(k=><OtherRow key={k.key} table={table} teams={teams} onStatus={onStatus}
       row={{id:null, name:'', team: teams.length===1 ? teams[0].name : '', pct:null,
@@ -1414,26 +1414,30 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return m;
   },[others]);
   const othersOf = n => othersByTeam.get(norm(n)) || [];
-  // The share of a team's hours left for programmes on a day, after other work.
-  const keepOn = (n, d) => {
-    const set = othersOf(n).reduce((a,o)=>a + ((o.s==null || o.s<=d) && (o.e==null || d<=o.e) ? o.pct : 0), 0);
-    return Math.max(0, 1-set);
-  };
-  // `gross` skips the other-work deduction, so the card can say how much it took.
-  const weekCapOf = (t, bucket, gross=false) => {
-    if(t.parts) return t.parts.reduce((a,p)=>a+weekCapOf(p, bucket, gross), 0);
-    const keep = d => gross ? 1 : keepOn(t.n, d);
+  // The share of a team's hours taken by other work on a day, capped at 100%.
+  const otherShareOn = (n, d) => Math.min(1,
+    othersOf(n).reduce((a,o)=>a + ((o.s==null || o.s<=d) && (o.e==null || d<=o.e) ? o.pct : 0), 0));
+  // Each day's capacity, weighted by `w(team, day)`: 1 for capacity itself, or the
+  // other-work share for the hours that work takes.
+  const capWeighted = (t, bucket, w) => {
+    if(t.parts) return t.parts.reduce((a,p)=>a+capWeighted(p, bucket, w), 0);
     if(split){
       const c = split.cap.get(t.n);
-      return c ? bucket.days.reduce((a,d)=>a+(c.get(d)||0)*keep(d), 0) : 0;
+      return c ? bucket.days.reduce((a,d)=>a+(c.get(d)||0)*w(t.n, d), 0) : 0;
     }
     let n = 0;
-    bucket.days.forEach(d=>{ if(!isHoliday(t.n, d)) n += keep(d); });
+    bucket.days.forEach(d=>{ if(!isHoliday(t.n, d)) n += w(t.n, d); });
     return t.wk100 * n / 5;
   };
-  const fullCapOf = (t, gross=false) => weekBuckets.length
-    ? weekBuckets.reduce((a,b)=>a+weekCapOf(t,b,gross),0)
+  const weekCapOf = (t, bucket) => capWeighted(t, bucket, ()=>1);
+  const fullCapOf = t => weekBuckets.length
+    ? weekBuckets.reduce((a,b)=>a+weekCapOf(t,b),0)
     : t.wk100*WEEKS*nQ;                       // no dates exposed: flat quarter
+  // Other work is load, not lost capacity: 40% standing work reads as 40% before
+  // any programme is added, and programmes stack on top of it.
+  const otherWeekOf = (t, bucket) => capWeighted(t, bucket, otherShareOn);
+  const otherOf = t => weekBuckets.reduce((a,b)=>a+otherWeekOf(t,b),0);
+  const loadOf = t => demandOf(t) + otherOf(t);
 
   // The people behind a card. With splits, that is everyone contributing time in
   // the selection — including people lent in from other teams — plus home members
@@ -1732,7 +1736,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
   let cards = listed.filter(t=>selTeams.has(t.n));
   // Same denominator the card shows, so "busiest" orders by the number on screen.
-  const util = t => { const c = fullCapOf(t); return c>0 ? demandOf(t)/c : (demandOf(t)>0?9:0); };
+  const util = t => { const c = fullCapOf(t), l = loadOf(t); return c>0 ? l/c : (l>0?9:0); };
   if(sortMode==='busy') cards.sort((a,b)=>util(b)-util(a));
   else {
     // Alphabetical, with each combined card placed straight after its members.
@@ -1810,26 +1814,28 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       </button>
       {openSections.teams && <div className="grid">
         {cards.map(t=>{
-          const wk=wkOf(t), noCap=wk===0, full=fullCapOf(t), d=demandOf(t);
+          // d is programme hours; load adds the team's other work on top.
+          const wk=wkOf(t), noCap=wk===0, full=fullCapOf(t), d=demandOf(t), oth=otherOf(t), load=d+oth;
           const progs = progsOf(t), canEdit = canEditSplits;
           const cap = full*usableOf(t);                  // the same 70% of a holiday-adjusted quarter
           const ppl = peopleOf(t), fte = fteOf(t);
           // Percentage and colour run off full capacity; "remaining" and the
           // reduction still measure against the 70% allowance, which is the
           // number a lead actually plans to.
-          const series = selWeeks.map(w=>membersOf(t).reduce((a,m)=>a+((weeklyByTeam.get(m)||new Map()).get(w)||0), 0));
+          const otherWk = weekBuckets.map(b=>otherWeekOf(t,b));
+          const series = selWeeks.map((w,i)=>otherWk[i] + membersOf(t).reduce((a,m)=>a+((weeklyByTeam.get(m)||new Map()).get(w)||0), 0));
           const weekCaps = weekBuckets.map(b=>weekCapOf(t,b));
           const ratios = series.map((h,i)=>weekCaps[i]>0 ? h/weekCaps[i] : 0);
           const peakIdx = ratios.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
           const peakU = (noCap||!series.length) ? null : ratios[peakIdx];
-          const uQ = noCap? null : d/full;
+          const uQ = noCap? null : load/full;
           // Top of the chart is 100%, or the peak when it exceeds — plus a tenth of
           // headroom so the tallest bar never crowds the text above it.
           const wkScale = Math.max(1, peakU||0) * 1.1;
           const pinIdx = (pinnedWk.get(t.n)!=null && pinnedWk.get(t.n)<series.length) ? pinnedWk.get(t.n) : null;
           const u = (pinIdx!=null && !noCap) ? ratios[pinIdx] : uQ;
           const bnd = (u==null)?'grey':band(u);
-          const rem = cap-d, red = d>cap? d-cap : 0;
+          const rem = cap-load, red = load>cap? load-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
           const tagTxt = noCap?'No capacity set':(bnd==='red'?'Over threshold':bnd==='amber'?'Approaching':'Healthy');
           const isCol = collapsed.has(t.n);
@@ -1877,10 +1883,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                       aria-expanded={open} title={open?'Hide the size breakdown':'Show the size breakdown'}>
                       By size{wkPinned ? ' · week of '+dayRange(weekSpans[pinIdx][0], weekSpans[pinIdx][1]) : ''}
                       <span>{open?'▾':'▸'}</span></button>;
-                  if(!sizes.length) return wkPinned ? <>{head}{open && <div className="sz-none">No work in this week</div>}</> : null;
+                  // Other work gets its own row, so the rows still add up to the figure above.
+                  const othHrs = wkPinned ? otherWk[pinIdx] : oth;
+                  if(!sizes.length && othHrs<=0.5) return wkPinned ? <>{head}{open && <div className="sz-none">No work in this week</div>}</> : null;
                   if(!open) return head;
                   const n = sizes.reduce((a,r)=>a+r.progs.size, 0);
-                  const h = sizes.reduce((a,r)=>a+r.hrs, 0);
+                  const h = sizes.reduce((a,r)=>a+r.hrs, 0) + (othHrs>0.5 ? othHrs : 0);
                   const share = v => (noCap || base<=0) ? '—' : (v>0 && v/base<0.005 ? '<1%' : pct(v/base)+'%');
                   return <>{head}<table className="sizes" title={"% is of this team's capacity for the "+(wkPinned?'pinned week':'selected period')+", so the rows add up to the figure above"}>
                     <thead><tr><th>Size</th><th className="n">Programmes</th><th className="n">Hours</th><th className="n">%</th><th/></tr></thead>
@@ -1894,6 +1902,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                           <td className="sbar">{!noCap && base>0 && <span className="strack"><i style={{width:Math.min(100, r.hrs/base*100)+'%', background:BC[bnd==='grey'?'green':bnd]}}/></span>}</td>
                         </tr>
                       ))}
+                      {othHrs>0.5 && <tr title="Standing work set aside under Other work">
+                        <td colSpan={2}><span className="nosz">Other work</span></td>
+                        <td className="n">{fmt(othHrs)}</td>
+                        <td className="n">{share(othHrs)}</td>
+                        <td className="sbar">{!noCap && base>0 && <span className="strack"><i style={{width:Math.min(100, othHrs/base*100)+'%', background:'var(--muted)'}}/></span>}</td>
+                      </tr>}
                       <tr className="tot"><td>Total</td><td className="n">{n}</td><td className="n">{fmt(h)}</td>
                         <td className="n" style={{color:(noCap||base<=0)?'inherit':BC[band(h/base)]}}>{share(h)}</td><td/></tr>
                       {sizes.unplanned>0.5 && <tr className="unp" title="Hours from programmes marked Unplanned Request">
@@ -1914,7 +1928,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
               </div>}
               {!isCol && othTable && (()=>{
                 const mine = membersOf(t).flatMap(m=>othersOf(m).map(o=>({...o, team:m})));
-                const setAside = fullCapOf(t, true) - full;
+                const setAside = oth;
                 const open = openOther.has(t.n);
                 return <div className="ofoot">
                   <button className="pcount" onClick={()=>toggleOther(t.n)} aria-expanded={open}
