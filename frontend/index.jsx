@@ -67,7 +67,7 @@ const isExcludedCoE = n => !n || [...EXCLUDED_COES].some(x=>norm(x)===norm(n));
 // Matched on a normalised name because several carry trailing spaces in the base.
 const DEFAULT_OFF_COES = ['ASO','APAC Marketing','Brand & Marketing Research',
                           'Global Business & Experience (Operations)','Marketing Partnerships',
-                          'Integrated B2B Marketing'];
+                          'Integrated B2B Marketing','Creative Lab','Product Marketing Management'];
 const isOffByDefault = n => DEFAULT_OFF_COES.some(x=>norm(x)===norm(n));
 
 // Teams reported as one. The combined card replaces its members everywhere on the
