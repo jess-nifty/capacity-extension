@@ -34,6 +34,14 @@ const PEOPLE = {table:'tblME4GTsam6VijUr', name:'fldST9rwsPokp6Q8A', coe:'fldVuB
 const ASSIGN = {table:'tbljJDapNeW2nR2vj', person:'fldfwIe0iGghiJPpX', coe:'fldsWvQzlCphTWRWm',
                 start:'fldMJc0lJTHzjvF01', end:'fldbtmWlHhjZ0esIn', split:'fld7Wvl0mUe0EoDGo'};
 
+// Team Other Allocation. A share of a whole team's hours set aside for work outside
+// programmes (BAU, admin, internal projects) for a date range — "15% of Paid Media,
+// 1 Oct–31 Dec". On each day in the range that share comes off the team's capacity.
+// No Start Date means from the beginning, no End Date means ongoing; rows for the
+// same team that overlap add up, capped at 100%.
+const OTHER = {table:'tblaI2Zud0SDgyLGh', name:'fld9TbS0poNyBqIql', team:'fldDOIvUAFkmxyB0f',
+               pct:'fldmN2zbFyltpIma7', start:'fldQOCCcK9hSdVfh3', end:'fldJdYgScNE0B2Wwd'};
+
 // US Public Holidays. Each row carries a date and the CoEs that observe it, so a
 // holiday can be team-specific even though today every row links to every team.
 const HOL = {table:'tblR2HjOPhwqZwOD3', date:'fldohX95jG7q7XaET', coes:'fldvq3NifBONt5cnk'};
@@ -180,6 +188,10 @@ loadCSSFromString(`
     line-height:1; flex:none; }
   .cap .thead:hover .tcaret { background:var(--purple); color:#fff; }
   .cap .team.collapsed .top { padding-bottom:14px; }
+  .cap .ofoot { padding:9px 14px 11px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
+  .cap .ofoot .pcount { align-self:flex-start; }
+  .cap .ofoot .ahint { font-size:11.5px; color:var(--muted); }
+  .cap .arow .oname { width:100%; min-width:0; }
   .cap .pfoot { padding:11px 14px 13px; border-top:1px solid var(--line); background:#fbfaff; }
   .cap .prow { display:flex; align-items:center; gap:10px; font-size:11.5px; }
   .cap .prow .pgo { margin-left:auto; }
@@ -672,6 +684,107 @@ function AssignEditor({person, cardTeam, rows, teamOptions, table, defaults, onC
   );
 }
 
+// ---- Other work editor ----
+// Opens under a team card. One row per block of set-aside time; a combined card
+// picks which member team the row belongs to.
+function OtherRow({row, teams, table, onStatus}){
+  const init = () => ({name:row.name, team:row.team, pct:row.pct==null ? '' : String(Math.round(row.pct*100)), s:isoDay(row.s), e:isoDay(row.e)});
+  const [d, setD] = useState(init);
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const isNew = !row.id;
+  const dirty = isNew || d.name!==row.name || d.team!==row.team || pctIn(d.pct)!==row.pct || d.s!==isoDay(row.s) || d.e!==isoDay(row.e);
+  const teamId = (teams.find(o=>o.name===d.team)||{}).id;
+
+  const save = async () => {
+    const share = pctIn(d.pct);
+    if(!teamId){ onStatus('Pick a team.', true); return; }
+    if(share==null || share>1){ onStatus('Enter a % between 0 and 100.', true); return; }
+    if(d.s && d.e && d.e < d.s){ onStatus('The end date is before the start date.', true); return; }
+    const fields = {[OTHER.name]: d.name.trim() || null, [OTHER.team]: [{id:teamId}], [OTHER.pct]: share,
+                    [OTHER.start]: d.s || null, [OTHER.end]: d.e || null};
+    const chk = isNew ? table.checkPermissionsForCreateRecord(fields) : table.checkPermissionsForUpdateRecord(row.id, fields);
+    if(!chk.hasPermission){ onStatus(chk.reasonDisplayString, true); return; }
+    setBusy(true);
+    try {
+      if(isNew){ await table.createRecordAsync(fields); onStatus('Added '+Math.round(share*100)+'% other work', false); row.onDone(); }
+      else { await table.updateRecordAsync(row.id, fields); onStatus('Saved', false); setBusy(false); }
+    }
+    catch(err){ onStatus("Couldn't save: "+err.message, true); setBusy(false); }
+  };
+  const remove = async () => {
+    const chk = table.checkPermissionsForDeleteRecord(row.id);
+    if(!chk.hasPermission){ onStatus(chk.reasonDisplayString, true); return; }
+    setBusy(true);
+    try { await table.deleteRecordAsync(row.id); onStatus('Removed', false); }
+    catch(err){ onStatus("Couldn't remove: "+err.message, true); setBusy(false); }
+  };
+
+  return (
+    <div className={'arow'+(isNew?' adraft':'')}>
+      <input className="oname" type="text" value={d.name} disabled={busy} placeholder="What it's for, e.g. BAU"
+        onChange={e=>setD({...d, name:e.target.value})} aria-label="What the time is for"/>
+      <span className="apct"><input type="number" min="0" max="100" step="5" value={d.pct} disabled={busy} placeholder="0"
+        onChange={e=>setD({...d, pct:e.target.value})} aria-label="Share of the team's hours (%)"/>%</span>
+      {teams.length>1 && <select style={{gridColumn:'1 / -1'}} value={d.team} disabled={busy}
+        onChange={e=>setD({...d, team:e.target.value})} aria-label="Team">
+        {!teamId && <option value={d.team}>{d.team || 'Choose a team…'}</option>}
+        {teams.map(o=><option key={o.id} value={o.name}>{o.name}</option>)}
+      </select>}
+      <div className="adates">
+        <input type="date" value={d.s} disabled={busy} onChange={e=>setD({...d, s:e.target.value})} aria-label="Start date"/>
+        <span className="ato">to</span>
+        <input type="date" value={d.e} disabled={busy} onChange={e=>setD({...d, e:e.target.value})} aria-label="End date (blank = ongoing)"
+          title="Leave blank for ongoing"/>
+        <span className="aact">
+          {dirty && <button className="abtn pri" onClick={save} disabled={busy}>Save</button>}
+          {dirty && !isNew && <button className="abtn" disabled={busy} onClick={()=>setD(init())}>Undo</button>}
+          {isNew && <button className="abtn xbtn" onClick={row.onDone} disabled={busy} title="Discard this new row" aria-label="Discard this new row">✕</button>}
+          {!dirty && (confirmDel
+            ? <><button className="abtn warn" onClick={remove} disabled={busy}>Remove</button>
+                <button className="abtn" onClick={()=>setConfirmDel(false)} disabled={busy}>Keep</button></>
+            : <button className="abtn xbtn" onClick={()=>setConfirmDel(true)} disabled={busy} title="Remove this row" aria-label="Remove this row">✕</button>)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function OtherEditor({rows, teams, table, defaults}){
+  const [drafts, setDrafts] = useState([]);
+  const [status, setStatus] = useState(null);
+  const onStatus = (msg, err) => setStatus({msg, err});
+  const addDraft = () => setDrafts(ds=>[...ds, {key: Date.now()+'-'+ds.length}]);
+  const dropDraft = key => setDrafts(ds=>ds.filter(x=>x.key!==key));
+  return <>
+    <div className="ahint">Hours set aside for work outside programmes, e.g. BAU or admin. That share comes off the team's capacity on those dates.</div>
+    {rows.map(r=><OtherRow key={r.id+'|'+r.name+'|'+r.team+'|'+r.pct+'|'+r.s+'|'+r.e} row={r} teams={teams} table={table} onStatus={onStatus}/>)}
+    {drafts.map(k=><OtherRow key={k.key} table={table} teams={teams} onStatus={onStatus}
+      row={{id:null, name:'', team: teams.length===1 ? teams[0].name : '', pct:null,
+            s: defaults.s ? Date.parse(defaults.s) : null, e: defaults.e ? Date.parse(defaults.e) : null,
+            onDone:()=>dropDraft(k.key)}}/>)}
+    <div className="aadds"><button className="aaddbtn" onClick={addDraft}>+ Add other work</button></div>
+    {status && <div className={'astat'+(status.err?' err':'')}>{status.msg}</div>}
+  </>;
+}
+
+function OtherLoader({table, children}){
+  const recs = useRecords(table);
+  const rows = useMemo(()=>(recs||[]).map(r=>{
+    const teams = (r.getCellValue(OTHER.team)||[]).map(t=>String(t.name).trim());
+    if(!teams.length) return null;
+    return {
+      id: r.id,
+      name: r.getCellValueAsString(OTHER.name),
+      teams,
+      pct: Math.min(1, Math.max(0, Number(r.getCellValue(OTHER.pct))||0)),
+      s: parseDate(r.getCellValue(OTHER.start)),          // null = from the start
+      e: parseDate(r.getCellValue(OTHER.end)),            // null = ongoing
+    };
+  }).filter(Boolean),[recs]);
+  return children(rows);
+}
+
 function HolidayLoader({table, children}){
   const recs = useRecords(table);
   const byTeam = useMemo(()=>{
@@ -794,9 +907,17 @@ function App(){
   const holTable = base.getTableByIdIfExists(HOL.table);
   const pplTable = base.getTableByIdIfExists(PEOPLE.table);
   const asgTable = base.getTableByIdIfExists(ASSIGN.table);
-  const dash = (hols, ppl, list, asg) => <Dashboard coeTable={coeTable} allocTable={allocTable}
+  const othTable = base.getTableByIdIfExists(OTHER.table);
+  // Other work needs every field; without them capacity is taken as it always was.
+  const othReady = othTable
+    && [OTHER.name, OTHER.team, OTHER.pct, OTHER.start, OTHER.end].every(f=>!!othTable.getFieldByIdIfExists(f));
+  const dash = (hols, ppl, list, asg) => othReady
+    ? <OtherLoader table={othTable}>{oth=>dashWith(hols, ppl, list, asg, oth)}</OtherLoader>
+    : dashWith(hols, ppl, list, asg, null);
+  const dashWith = (hols, ppl, list, asg, oth) => <Dashboard coeTable={coeTable} allocTable={allocTable}
                                          progTable={progTable} holidays={hols} peopleByTeam={ppl}
-                                         peopleList={list} assignments={asg} asgTable={asg ? asgTable : null}/>;
+                                         peopleList={list} assignments={asg} asgTable={asg ? asgTable : null}
+                                         others={oth} othTable={oth ? othTable : null}/>;
   const pplReady = pplTable
     && [PEOPLE.name, PEOPLE.coe, PEOPLE.leader].every(f=>!!pplTable.getFieldByIdIfExists(f));
   // Split capacity needs every Team Assignment field; without them the page keeps
@@ -815,7 +936,7 @@ function App(){
     : withPeople(null);
 }
 
-function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peopleList, assignments, asgTable}){
+function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peopleList, assignments, asgTable, others, othTable}){
   const coeRecords = useRecords(coeTable);
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
@@ -1253,18 +1374,36 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // A bar is worth the working days it actually holds, less that team's public
   // holidays. It is the same day set the load is spread over, so the two sides
   // cannot drift — and a folded seven-day bar is measured against seven days.
-  const weekCapOf = (t, bucket) => {
-    if(t.parts) return t.parts.reduce((a,p)=>a+weekCapOf(p, bucket), 0);
+  // Other work rows by team, so the share a team keeps on a day is a quick lookup.
+  const othersByTeam = useMemo(()=>{
+    const m = new Map();
+    (others||[]).forEach(o=>o.teams.forEach(n=>{
+      const k = norm(n);
+      if(!m.has(k)) m.set(k, []);
+      m.get(k).push(o);
+    }));
+    return m;
+  },[others]);
+  const othersOf = n => othersByTeam.get(norm(n)) || [];
+  // The share of a team's hours left for programmes on a day, after other work.
+  const keepOn = (n, d) => {
+    const set = othersOf(n).reduce((a,o)=>a + ((o.s==null || o.s<=d) && (o.e==null || d<=o.e) ? o.pct : 0), 0);
+    return Math.max(0, 1-set);
+  };
+  // `gross` skips the other-work deduction, so the card can say how much it took.
+  const weekCapOf = (t, bucket, gross=false) => {
+    if(t.parts) return t.parts.reduce((a,p)=>a+weekCapOf(p, bucket, gross), 0);
+    const keep = d => gross ? 1 : keepOn(t.n, d);
     if(split){
       const c = split.cap.get(t.n);
-      return c ? bucket.days.reduce((a,d)=>a+(c.get(d)||0), 0) : 0;
+      return c ? bucket.days.reduce((a,d)=>a+(c.get(d)||0)*keep(d), 0) : 0;
     }
     let n = 0;
-    bucket.days.forEach(d=>{ if(!isHoliday(t.n, d)) n++; });
+    bucket.days.forEach(d=>{ if(!isHoliday(t.n, d)) n += keep(d); });
     return t.wk100 * n / 5;
   };
-  const fullCapOf = t => weekBuckets.length
-    ? weekBuckets.reduce((a,b)=>a+weekCapOf(t,b),0)
+  const fullCapOf = (t, gross=false) => weekBuckets.length
+    ? weekBuckets.reduce((a,b)=>a+weekCapOf(t,b,gross),0)
     : t.wk100*WEEKS*nQ;                       // no dates exposed: flat quarter
 
   // The people behind a card. With splits, that is everyone contributing time in
@@ -1429,6 +1568,10 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return {s:isoDay(Math.min(...selBounds.map(b=>b[0]))), e:isoDay(Math.max(...selBounds.map(b=>b[1])))};
   },[selBounds]);
   const canEditSplits = !!peopleList;
+  // Which cards have their Other work section open.
+  const [openOther, setOpenOther] = useState(new Set());
+  const toggleOther = n => setOpenOther(s=>{ const x = new Set(s); x.has(n) ? x.delete(n) : x.add(n); return x; });
+  const coeIdByName = useMemo(()=>new Map((coeRecords||[]).map(r=>[norm(r.getCellValueAsString(COE.name)), r.id])),[coeRecords]);
   const diagnosis = useMemo(()=>{
     const m = new Map();
     if(!hasDates || !selWeeks.length) return m;
@@ -1728,6 +1871,20 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 <div><div className="k">Reduction to hit 70%</div><div className="v" style={{color:red>0?'var(--red)':'var(--green)'}}>{red>0?fmt(red)+' hrs':'None'}</div></div>
                 <div><div className="k">Working hrs / week{split?' (avg)':''}</div><div className="v">{fmt(wk)} <small>/ 70%: {fmt(wk*usableOf(t))}</small></div></div>
               </div>}
+              {!isCol && othTable && (()=>{
+                const mine = membersOf(t).flatMap(m=>othersOf(m).map(o=>({...o, team:m})));
+                const setAside = fullCapOf(t, true) - full;
+                const open = openOther.has(t.n);
+                return <div className="ofoot">
+                  <button className="pcount" onClick={()=>toggleOther(t.n)} aria-expanded={open}
+                    title="Hours this team sets aside for work outside programmes">
+                    Other work{setAside>0.5 ? ' · '+fmt(setAside)+' hrs set aside' : mine.length ? '' : ' · none'}
+                    <span>{open?'▾':'▸'}</span>
+                  </button>
+                  {open && <OtherEditor rows={mine} table={othTable} defaults={editDefaults}
+                    teams={membersOf(t).map(m=>({id:coeIdByName.get(norm(m)), name:m})).filter(o=>o.id)}/>}
+                </div>;
+              })()}
               {!isCol && ppl && <div className="pfoot">
                 <div className="prow">
                   <button className="pcount" onClick={()=>toggleTeam(t.n)}
