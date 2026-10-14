@@ -60,7 +60,9 @@ const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','
 const WEEKS = 13;
 
 // Status buckets, taken from the "Accepted & Submitted Capacity Planning" dashboard so
-// the numbers here agree with it. Submitted = everything except Rejected; Accepted is
+// the numbers here agree with it. Submitted = everything except Rejected and Cancelled
+// (Cancelled is dropped here even though that dashboard keeps it: a cancelled
+// programme's allocations are often left behind and would count as live work); Accepted is
 // the two approved statuses. Choice names are compared trimmed: "Rejected " carries a
 // trailing space in the base.
 // CoEs that are never real delivery capacity, so they are dropped from the team
@@ -110,7 +112,9 @@ const programUrl = id => PROGRAM_PAGE + '/' + id;
 // names in this base carry stray spaces.
 const ACCEPTED_STATUSES = new Set(['Capacity Planning','Approved to Submit Brief','In Production',
                                    'Accepted - Capacity Planning'].map(norm));
-const REJECTED_STATUS = 'Rejected';
+// Programmes that are not going ahead. Their allocations are dropped everywhere.
+const DROPPED_STATUSES = new Set(['Rejected','Cancelled'].map(norm));
+const isDropped = st => !!st && DROPPED_STATUSES.has(norm(st));
 
 // "Accepted & Submitted Capacity Planning" in the Marketing Operations interface.
 // The query string carries that page's own status filters, so the link lands on the
@@ -1111,7 +1115,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         // Both false when Program Status isn't exposed, so every total keeps its
         // previous unfiltered behaviour rather than silently dropping to zero.
         isAccepted: st ? ACCEPTED_STATUSES.has(norm(st)) : false,
-        isRejected: st ? st === REJECTED_STATUS : false,
+        isDropped: isDropped(st),
         // Same order as status: the programme's own field, then the allocation's lookup.
         unplanned: isUnplanned((pm && pm.ty) ? pm.ty
                     : (hasAllocType ? lookupText(r.getCellValue(ALLOC.type)) : null)),
@@ -1171,7 +1175,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const s = new Set();
     if(hasDates){
       allRows.forEach(x=>{
-        if(x.isRejected) return;
+        if(x.isDropped) return;
         const dm = rowDays.get(x.id);
         if(dm) dm.forEach((_,d)=>s.add(periodKey(d, period)));
       });
@@ -1272,7 +1276,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const m = new Map();
     if(!hasDates) return m;
     rows.forEach(x=>{
-      if(x.isRejected) return;
+      if(x.isDropped) return;
       const dm = rowDays.get(x.id);
       if(!dm) return;
       const t = m.get(x.coe) || new Map();
@@ -1289,7 +1293,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const byProg = new Map(), byTeam = new Map();
     let total = 0;
     rows.forEach(x=>{
-      if(x.isRejected || !coeSelected(x.coe)) return;
+      if(x.isDropped || !coeSelected(x.coe)) return;
       if(!(x.s==null || x.e==null || x.e < x.s)) return;
       total += x.sub;
       byTeam.set(x.coe, (byTeam.get(x.coe)||0) + x.sub);
@@ -1506,7 +1510,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const m = new Map();
     if(!hasDates) return m;
     rows.forEach(x=>{
-      if(x.isRejected) return;
+      if(x.isDropped) return;
       const dm = rowDays.get(x.id);
       if(!dm) return;
       let h = 0;
@@ -1560,7 +1564,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     if(days){
       const ms = membersOf(t), want = new Set(days);
       rows.forEach(x=>{
-        if(x.isRejected || !ms.includes(x.coe)) return;
+        if(x.isDropped || !ms.includes(x.coe)) return;
         const dm = rowDays.get(x.id);
         if(!dm) return;
         let h = 0;
@@ -1621,7 +1625,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       const byProg = new Map(), perWeek = new Map(), progsPerWeek = new Map();
       let total = 0;
       rows.forEach(x=>{
-        if(!ms.includes(x.coe) || x.isRejected) return;
+        if(!ms.includes(x.coe) || x.isDropped) return;
         const dm = rowDays.get(x.id);
         if(!dm) return;
         let h = 0;
@@ -1689,7 +1693,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const demandOf = t => {
     const ms = membersOf(t);
     return rows.reduce((s,x)=>{
-      if(!ms.includes(x.coe) || x.isRejected) return s;
+      if(!ms.includes(x.coe) || x.isDropped) return s;
       return s + (hoursInSel(x) || 0);
     },0);
   };
@@ -1700,7 +1704,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   rows.forEach(x=>{
     if(!coeSelected(x.coe)) return;
     if(!buAgg[x.bu]) return; // Unassigned & others not shown
-    if(x.isRejected) return;                       // Submitted = everything but Rejected
+    if(x.isDropped) return;                       // Submitted = everything but Rejected/Cancelled
     const h = hoursInSel(x) || 0;                  // placed by date, like the cards
     buAgg[x.bu].sub += h;
     if(!hasStatusField || x.isAccepted) buAgg[x.bu].acc += x.acc;
@@ -1712,13 +1716,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // Counted from Programs, not from allocations: the overwhelming majority of live
   // programs have no Program CoE Allocation rows yet, so an allocation-derived count
   // reported a handful instead of the real figure. Submitted means every status
-  // except Rejected, matching the hours. The Teams filter deliberately does not
+  // except Rejected and Cancelled, matching the hours. The Teams filter deliberately does not
   // apply — a program spans several CoEs, so there is no one team it belongs to.
   const progInView = useMemo(()=>{
     let n = 0;
     progMap.forEach(pm=>{
       if(pm.test) return;
-      if(pm.st === REJECTED_STATUS) return;
+      if(isDropped(pm.st)) return;
       if(inQ(qKey(pm.q, pm.y))) n++;
     });
     return n;
