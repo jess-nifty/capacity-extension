@@ -1818,11 +1818,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
           // d is programme hours; load adds the team's other work on top.
           const wk=wkOf(t), noCap=wk===0, full=fullCapOf(t), d=demandOf(t), oth=otherOf(t), load=d+oth;
           const progs = progsOf(t), canEdit = canEditSplits;
-          const cap = full*usableOf(t);                  // the same 70% of a holiday-adjusted quarter
           const ppl = peopleOf(t), fte = fteOf(t);
-          // Percentage and colour run off full capacity; "remaining" and the
-          // reduction still measure against the 70% allowance, which is the
-          // number a lead actually plans to.
+          // Percentage and colour run off full capacity.
           const otherWk = weekBuckets.map(b=>otherWeekOf(t,b));
           const series = selWeeks.map((w,i)=>otherWk[i] + membersOf(t).reduce((a,m)=>a+((weeklyByTeam.get(m)||new Map()).get(w)||0), 0));
           const weekCaps = weekBuckets.map(b=>weekCapOf(t,b));
@@ -1836,7 +1833,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
           const pinIdx = (pinnedWk.get(t.n)!=null && pinnedWk.get(t.n)<series.length) ? pinnedWk.get(t.n) : null;
           const u = (pinIdx!=null && !noCap) ? ratios[pinIdx] : uQ;
           const bnd = (u==null)?'grey':band(u);
-          const rem = cap-load, red = load>cap? load-cap : 0;
           const tagCls = noCap?'t-grey':(bnd==='red'?'t-red':bnd==='amber'?'t-amber':'t-green');
           const tagTxt = noCap?'No capacity set':(bnd==='red'?'Over threshold':bnd==='amber'?'Approaching':'Healthy');
           const isCol = collapsed.has(t.n);
@@ -1920,13 +1916,23 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 </>}
               </div>
               {!isCol && <div className="metrics">
-                {/* Short labels to keep the grid tight; the full meaning is on hover. */}
-                <div title={'Working hours in the selection, 100% of capacity'+(holidays?', net of holidays':'')}><div className="k">Working hrs</div><div className="v">{fmt(full)}</div></div>
-                <div title="Usable hours in the selection: 70% of working hours"><div className="k">Usable (70%)</div><div className="v">{fmt(cap)}</div></div>
-                <div title="Programme hours in the selection, counted statuses only (excludes Other work)"><div className="k">Programmes</div><div className="v">{fmt(d)}</div></div>
-                <div title="Usable hours minus submitted hours and Other work"><div className="k">Remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
-                <div title="Hours to cut to bring the load down to 70%"><div className="k">Cut to 70%</div><div className="v" style={{color:red>0?'var(--red)':'var(--green)'}}>{red>0?fmt(red):'None'}</div></div>
-                <div title={'Working hours per week'+(split?', averaged over the selection':'')+' · 70%: '+fmt(wk*usableOf(t))}><div className="k">Hrs / week{split?' (avg)':''}</div><div className="v">{fmt(wk)} <small>/ {fmt(wk*usableOf(t))}</small></div></div>
+                {/* Load split three ways, as hours and as a share of the hours available
+                    (100% of working hours, net of holidays). Short labels keep the grid
+                    tight; the full meaning is on hover. */}
+                {(()=>{
+                  const unp = progs.reduce((a,pp)=>a+(pp.unplanned?pp.hrs:0), 0);
+                  const pln = Math.max(0, d-unp);
+                  const avail = 'of '+fmt(full)+' hrs available'+(holidays?', net of holidays':'');
+                  const share = v => noCap ? '—' : (v>0 && v/full<0.005 ? '<1%' : pct(v/full)+'%');
+                  return <>
+                    <div title="Quarterly Planned hours submitted in the selection"><div className="k">Planned hrs</div><div className="v">{fmt(pln)}</div></div>
+                    <div title="Unplanned Request hours submitted in the selection"><div className="k">Unplanned hrs</div><div className="v">{fmt(unp)}</div></div>
+                    <div title="Standing work hours set aside under Other work"><div className="k">Standing hrs</div><div className="v">{fmt(oth)}</div></div>
+                    <div title={'Quarterly Planned hours as a % '+avail}><div className="k">Planned %</div><div className="v">{share(pln)}</div></div>
+                    <div title={'Unplanned hours as a % '+avail}><div className="k">Unplanned %</div><div className="v">{share(unp)}</div></div>
+                    <div title={'Standing work as a % '+avail}><div className="k">Standing %</div><div className="v">{share(oth)}</div></div>
+                  </>;
+                })()}
               </div>}
               {!isCol && othTable && (()=>{
                 const mine = membersOf(t).flatMap(m=>othersOf(m).map(o=>({...o, team:m})));
