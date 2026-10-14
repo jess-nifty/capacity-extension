@@ -59,12 +59,11 @@ const isUnplanned = name => norm(name)===norm(TYPE_UNPLANNED);
 const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','YAds','Fantasy'];
 const WEEKS = 13;
 
-// Status buckets, taken from the "Accepted & Submitted Capacity Planning" dashboard so
-// the numbers here agree with it. Submitted = everything except Rejected and Cancelled
-// (Cancelled is dropped here even though that dashboard keeps it: a cancelled
-// programme's allocations are often left behind and would count as live work); Accepted is
-// the two approved statuses. Choice names are compared trimmed: "Rejected " carries a
-// trailing space in the base.
+// Only programmes the team has taken on count: Capacity Planning, Approved for Brief &
+// Strategy and In Production. Everything else — Backlog, Submitted, Sent Back, In Review,
+// Rejected, Cancelled, or no status at all — is left out of every figure. This differs
+// from the "Accepted & Submitted Capacity Planning" dashboard, which counts submitted
+// work too. Choice names are compared normalised, as some carry stray spaces in the base.
 // CoEs that are never real delivery capacity, so they are dropped from the team
 // cards, the totals and the timeline alike. Names are compared trimmed: "Other "
 // carries a trailing space in the base.
@@ -106,15 +105,12 @@ const personUrl = id => PEOPLE_PAGE + '/' + id;
 const PROGRAM_PAGE = 'https://airtable.com/appE8STdMZa2kq9eb/pag6P2FCsWsQFIqdI';
 const programUrl = id => PROGRAM_PAGE + '/' + id;
 
-// Accepted = the programme has been taken on. "Accepted - Capacity Planning" was
-// renamed "Capacity Planning" in the base and "In Production" was added after it;
-// the old name stays so history reads the same. Compared normalised, as choice
-// names in this base carry stray spaces.
-const ACCEPTED_STATUSES = new Set(['Capacity Planning','Approved to Submit Brief','In Production',
-                                   'Accepted - Capacity Planning'].map(norm));
-// Programmes that are not going ahead. Their allocations are dropped everywhere.
-const DROPPED_STATUSES = new Set(['Rejected','Cancelled'].map(norm));
-const isDropped = st => !!st && DROPPED_STATUSES.has(norm(st));
+// The statuses that count. "Accepted - Capacity Planning" and "Approved to Submit Brief"
+// are earlier names of Capacity Planning and Approved for Brief & Strategy, kept so
+// older records still match.
+const COUNTED_STATUSES = new Set(['Capacity Planning','Approved for Brief & Strategy','In Production',
+                                  'Accepted - Capacity Planning','Approved to Submit Brief'].map(norm));
+const isCounted = st => COUNTED_STATUSES.has(norm(st));
 
 // "Accepted & Submitted Capacity Planning" in the Marketing Operations interface.
 // The query string carries that page's own status filters, so the link lands on the
@@ -1114,8 +1110,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         st,
         // Both false when Program Status isn't exposed, so every total keeps its
         // previous unfiltered behaviour rather than silently dropping to zero.
-        isAccepted: st ? ACCEPTED_STATUSES.has(norm(st)) : false,
-        isDropped: isDropped(st),
+        isAccepted: isCounted(st),
+        // Without a status field every allocation is kept, rather than all of them dropping.
+        isDropped: hasStatusField && !isCounted(st),
         // Same order as status: the programme's own field, then the allocation's lookup.
         unplanned: isUnplanned((pm && pm.ty) ? pm.ty
                     : (hasAllocType ? lookupText(r.getCellValue(ALLOC.type)) : null)),
@@ -1126,7 +1123,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
     // ^ programmes with Testing Programs ticked are excluded here, and so is any
     //   allocation whose programme the extension cannot see.
-  },[allocRecords, progMap, hasAllocStatus, hasAllocType, hasDates, hasSize]);
+  },[allocRecords, progMap, hasAllocStatus, hasStatusField, hasAllocType, hasDates, hasSize]);
 
   // Type filter. Everything below reads `rows`, so cards, totals, the timeline and
   // the business-unit table all follow it. Periods and day spreads are built from
@@ -1704,7 +1701,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   rows.forEach(x=>{
     if(!coeSelected(x.coe)) return;
     if(!buAgg[x.bu]) return; // Unassigned & others not shown
-    if(x.isDropped) return;                       // Submitted = everything but Rejected/Cancelled
+    if(x.isDropped) return;                       // only counted statuses
     const h = hoursInSel(x) || 0;                  // placed by date, like the cards
     buAgg[x.bu].sub += h;
     if(!hasStatusField || x.isAccepted) buAgg[x.bu].acc += x.acc;
@@ -1715,18 +1712,18 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const shown = listed.filter(t=>selTeams.has(t.n));
   // Counted from Programs, not from allocations: the overwhelming majority of live
   // programs have no Program CoE Allocation rows yet, so an allocation-derived count
-  // reported a handful instead of the real figure. Submitted means every status
-  // except Rejected and Cancelled, matching the hours. The Teams filter deliberately does not
+  // reported a handful instead of the real figure. Only counted statuses are included,
+  // matching the hours. The Teams filter deliberately does not
   // apply — a program spans several CoEs, so there is no one team it belongs to.
   const progInView = useMemo(()=>{
     let n = 0;
     progMap.forEach(pm=>{
       if(pm.test) return;
-      if(isDropped(pm.st)) return;
+      if(hasStatusField && !isCounted(pm.st)) return;
       if(inQ(qKey(pm.q, pm.y))) n++;
     });
     return n;
-  },[progMap, selQ]);
+  },[progMap, selQ, hasStatusField]);
   // Net of holidays and of part-weeks at the period edges, like the cards. A flat
   // 13 x weekly hours quietly disagreed with every figure underneath it. The base's
   // own 70% field sets the ratio, rather than assuming it is exactly 0.70.
@@ -1782,15 +1779,15 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {' · '}<b>{shown.length}</b> of {listed.length} teams
         {hasType && selTy.size<TYPE_OPTIONS.length && <>{' · '}<b>{selTy.size ? [...selTy].join(', ') + ' only' : 'no type selected'}</b></>}
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
-        {!hasStatusField && <span className="warn">{' · '}Turn on Program Status to exclude rejected programs</span>}
+        {!hasStatusField && <span className="warn">{' · '}Turn on Program Status so only Capacity Planning, Approved for Brief & Strategy and In Production count</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
       </div>
 
       <div className="kpis">
-        <div className="kpi"><div className="n">{progInView}</div><div className="l">Submitted programs</div></div>
+        <div className="kpi"><div className="n">{progInView}</div><div className="l">Programs counted</div></div>
         <div className="kpi"><div className="n">{shown.length}</div><div className="l">Teams shown</div></div>
         <div className="kpi"><div className="n">{fmt(totCap)} <small>hrs</small></div><div className="l">Usable capacity, selected quarter(s)</div></div>
-        <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Submitted hours (selected)</div></div>
+        <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Hours counted (selected)</div></div>
       </div>
 
       <button className="st st-toggle" onClick={()=>toggleSection('bu')}
@@ -1798,7 +1795,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         Total per Business Unit <span className="tcaret">{openSections.bu?'▾':'▸'}</span>
       </button>
       {openSections.bu && <table className="bu">
-        <thead><tr><th>Business Unit</th><th className="num">Submitted hrs</th>
+        <thead><tr><th>Business Unit</th><th className="num">Hours</th>
           <th className="num">Business-critical hrs</th><th className="num acc">Accepted hrs</th></tr></thead>
         <tbody>
           {BU_ORDER.map(b=>(
@@ -1926,7 +1923,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 {/* Short labels to keep the grid tight; the full meaning is on hover. */}
                 <div title={'Working hours in the selection, 100% of capacity'+(holidays?', net of holidays':'')}><div className="k">Working hrs</div><div className="v">{fmt(full)}</div></div>
                 <div title="Usable hours in the selection: 70% of working hours"><div className="k">Usable (70%)</div><div className="v">{fmt(cap)}</div></div>
-                <div title="Programme hours submitted in the selection (excludes Other work)"><div className="k">Submitted</div><div className="v">{fmt(d)}</div></div>
+                <div title="Programme hours in the selection, counted statuses only (excludes Other work)"><div className="k">Programmes</div><div className="v">{fmt(d)}</div></div>
                 <div title="Usable hours minus submitted hours and Other work"><div className="k">Remaining</div><div className="v" style={{color:rem<0?'var(--red)':'inherit'}}>{fmt(rem)}</div></div>
                 <div title="Hours to cut to bring the load down to 70%"><div className="k">Cut to 70%</div><div className="v" style={{color:red>0?'var(--red)':'var(--green)'}}>{red>0?fmt(red):'None'}</div></div>
                 <div title={'Working hours per week'+(split?', averaged over the selection':'')+' · 70%: '+fmt(wk*usableOf(t))}><div className="k">Hrs / week{split?' (avg)':''}</div><div className="v">{fmt(wk)} <small>/ {fmt(wk*usableOf(t))}</small></div></div>
