@@ -1622,6 +1622,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return next;
   });
 
+  // Stacked by-type charts, folded shut until opened, by card.
+  const [openTypes, setOpenTypes] = useState(()=>new Set());
+  const toggleTypes = n => setOpenTypes(prev=>{
+    const next = new Set(prev);
+    next.has(n) ? next.delete(n) : next.add(n);
+    return next;
+  });
+
   const [openProgs, setOpenProgs] = useState(()=>new Set());
   const toggleProgs = n => setOpenProgs(prev=>{
     const next = new Set(prev);
@@ -1914,11 +1922,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                   series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
                   pinned={pinIdx} scale={wkScale}
                   onPick={i=>pickWeek(t.n,i)}/>}
-                {hasDates && series.length>0 && <WeekChart stacked
-                  weeks={selWeeks} spans={weekSpans} widths={weekWidths}
-                  series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
-                  pinned={pinIdx} scale={wkScale}
-                  onPick={i=>pickWeek(t.n,i)}/>}
                 {(()=>{
                   // A pinned week narrows the table to that week and its capacity,
                   // matching the big figure above it.
@@ -1963,6 +1966,17 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     </tbody>
                   </table></>;
                 })()}
+                {hasDates && series.length>0 && <>
+                  <button className="sz-toggle" onClick={()=>toggleTypes(t.n)}
+                    aria-expanded={openTypes.has(t.n)}
+                    title={openTypes.has(t.n)?'Hide the weekly split by type':'Show each week split into standing, planned and unplanned work'}>
+                    By type<span>{openTypes.has(t.n)?'▾':'▸'}</span></button>
+                  {openTypes.has(t.n) && <WeekChart stacked
+                    weeks={selWeeks} spans={weekSpans} widths={weekWidths}
+                    series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
+                    pinned={pinIdx} scale={wkScale}
+                    onPick={i=>pickWeek(t.n,i)}/>}
+                </>}
                 </>}
               </div>
               {!isCol && <div className="metrics">
