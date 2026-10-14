@@ -308,6 +308,7 @@ loadCSSFromString(`
     opacity:0; visibility:hidden; transform:translateY(-3px); transition:opacity .12s, transform .12s; }
   .cap .tagwrap:hover .tip { opacity:1; visibility:visible; transform:translateY(0); }
   .cap .wk { margin:18px 0 2px; }
+  .cap .wk.wk-2 { margin-top:8px; }
   .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:62px;
     border-bottom:1px solid var(--line); }
   .cap .wk-thr { position:absolute; right:0; top:var(--thr); transform:translateY(-50%); font-size:9px;
@@ -470,13 +471,15 @@ const STACK = [
   {k:'Planned',   c:'#5b3df5'},
   {k:'Unplanned', c:'#e8618c'},
 ];
-function WeekChart({weeks, spans, widths, series, stacks, caps, noCap, pinned, onPick, scale}){
+// `stacked` draws the by-type version; without it, each bar is one block coloured
+// by load band, as before. Each card shows both.
+function WeekChart({weeks, spans, widths, series, stacks, stacked, caps, noCap, pinned, onPick, scale}){
   const [hov, setHov] = useState(null);
   const show = hov!=null ? hov : pinned;
   const uu = i => (noCap || !caps[i]) ? 0 : series[i]/caps[i];
   const label = i => dayRange(spans[i][0], spans[i][1]);
   return (
-    <div className="wk">
+    <div className={'wk'+(stacked?' wk-2':'')}>
       <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%'}}>
         <span className="wk-thr">70%</span>
         {series.map((h,i)=>(
@@ -486,12 +489,12 @@ function WeekChart({weeks, spans, widths, series, stacks, caps, noCap, pinned, o
             onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
             onClick={()=>onPick(i)}
             title={label(i)+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')
-                   +(h>0 ? ' ('+STACK.map((s,j)=>s.k+' '+fmt(stacks[i][j])).join(' · ')+')' : '')}>
-            {h>0 && !noCap
+                   +(stacked && h>0 ? ' ('+STACK.map((s,j)=>s.k+' '+fmt(stacks[i][j])).join(' · ')+')' : '')}>
+            {stacked && h>0 && !noCap
               ? <i className="stk" style={{height: Math.max(3,(uu(i)/scale)*100)+'%'}}>
                   {STACK.map((s,j)=>stacks[i][j]>0 && <b key={s.k} style={{height:(stacks[i][j]/h*100)+'%', background:s.c}}/>)}
                 </i>
-              : <i className={h>0 ? 'grey' : 'zero'}
+              : <i className={h>0 ? (noCap?'grey':band(uu(i))) : 'zero'}
                    style={{height: h>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '2px'}}/>}
           </span>
         ))}
@@ -505,14 +508,14 @@ function WeekChart({weeks, spans, widths, series, stacks, caps, noCap, pinned, o
             {newMonth ? dt.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'}) : ''}</span>;
         })}
       </div>
-      <div className="wk-key">
+      {stacked && <div className="wk-key">
         {STACK.map(s=><span key={s.k}><i style={{background:s.c}}/>{s.k}</span>)}
-      </div>
+      </div>}
       <div className="wk-read">
         {show!=null && series.length
           ? <><span className="wk-wk">{label(show)}</span>
               <b style={{color: noCap ? 'inherit' : 'var(--'+band(uu(show))+')'}}>{noCap?'—':pct(uu(show))+'%'}</b>
-              <span className="wk-h"> · {fmt(series[show])} hrs · {STACK.map((s,j)=>s.k+' '+fmt(stacks[show][j])).join(' · ')}</span>
+              <span className="wk-h"> · {fmt(series[show])} hrs{stacked && <> · {STACK.map((s,j)=>s.k+' '+fmt(stacks[show][j])).join(' · ')}</>}</span>
               {pinned!=null && hov==null && <span className="wk-pin"> pinned</span>}</>
           : null}
       </div>
@@ -1907,6 +1910,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     : (hasDates && !series.length ? 'No dated work in this selection' : avgLabel)}
                 </div>
                 {hasDates && series.length>0 && <WeekChart
+                  weeks={selWeeks} spans={weekSpans} widths={weekWidths}
+                  series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
+                  pinned={pinIdx} scale={wkScale}
+                  onPick={i=>pickWeek(t.n,i)}/>}
+                {hasDates && series.length>0 && <WeekChart stacked
                   weeks={selWeeks} spans={weekSpans} widths={weekWidths}
                   series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
                   pinned={pinIdx} scale={wkScale}
