@@ -325,9 +325,6 @@ loadCSSFromString(`
   .cap .wk-key { display:flex; gap:10px; margin-top:5px; font-size:10px; color:var(--muted); }
   .cap .wk-key span { display:inline-flex; align-items:center; gap:4px; }
   .cap .wk-key i { width:8px; height:8px; border-radius:2px; display:inline-block; }
-  .cap .wk-key i.dash { width:12px; height:0; border-radius:0; border-top:2px dashed var(--ink); }
-  .cap .wk-b { position:relative; }
-  .cap .wk-sl { position:absolute; left:-1px; right:-1px; height:0; border-top:2px dashed var(--ink); pointer-events:none; }
 
   .cap .wk-ax { display:flex; gap:3px; margin-top:5px; }
   .cap .wk-ax span { flex:1; font-size:9.5px; color:var(--muted); white-space:nowrap; }
@@ -465,21 +462,19 @@ function lookupText(cell){
 // `spans` clips each week to the days inside the selected period, so a bar is named
 // after the days it actually charges. Without it a Q4 view labelled its first bar
 // "Sep", because the week of 28 Sep carries 1–2 Oct.
-// Each bar is programme work only, stacked Quarterly Planned then Unplanned on top.
-// Standing work is a fixed allowance rather than booked work, so it is drawn as a
-// dashed line at its level instead of as part of the bar. The read-out's % is the
-// whole load, standing included, matching the card's headline.
-// stacks[i] is [standing, planned, unplanned].
+// Each bar is stacked: standing work at the bottom, then Quarterly Planned, then
+// Unplanned on top. Colours name the kind of work; the threshold line and the
+// read-out carry how loaded the week is.
 const STACK = [
-  {k:'Planned',   c:'#5b3df5', j:1},
-  {k:'Unplanned', c:'#e8618c', j:2},
+  {k:'Standing',  c:'#a9a4c2'},
+  {k:'Planned',   c:'#5b3df5'},
+  {k:'Unplanned', c:'#e8618c'},
 ];
 function WeekChart({weeks, spans, widths, series, stacks, caps, noCap, pinned, onPick, scale}){
   const [hov, setHov] = useState(null);
   const show = hov!=null ? hov : pinned;
   const uu = i => (noCap || !caps[i]) ? 0 : series[i]/caps[i];
   const label = i => dayRange(spans[i][0], spans[i][1]);
-  const parts = i => ['Planned '+fmt(stacks[i][1]), 'Unplanned '+fmt(stacks[i][2]), 'Standing '+fmt(stacks[i][0])].join(' · ');
   return (
     <div className="wk">
       <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%'}}>
@@ -491,20 +486,13 @@ function WeekChart({weeks, spans, widths, series, stacks, caps, noCap, pinned, o
             onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
             onClick={()=>onPick(i)}
             title={label(i)+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')
-                   +(h>0 ? ' ('+parts(i)+')' : '')}>
-            {(()=>{
-              const pg = stacks[i][1]+stacks[i][2];
-              const ht = v => (v/caps[i]/scale)*100;
-              if(noCap || !caps[i]) return <i className={h>0 ? 'grey' : 'zero'} style={{height: h>0 ? '3px' : '2px'}}/>;
-              return <>
-                {pg>0
-                  ? <i className="stk" style={{height: Math.max(3, ht(pg))+'%'}}>
-                      {STACK.map(s=>stacks[i][s.j]>0 && <b key={s.k} style={{height:(stacks[i][s.j]/pg*100)+'%', background:s.c}}/>)}
-                    </i>
-                  : <i className="zero" style={{height:'2px'}}/>}
-                {stacks[i][0]>0 && <span className="wk-sl" style={{bottom: Math.min(100, ht(stacks[i][0]))+'%'}}/>}
-              </>;
-            })()}
+                   +(h>0 ? ' ('+STACK.map((s,j)=>s.k+' '+fmt(stacks[i][j])).join(' · ')+')' : '')}>
+            {h>0 && !noCap
+              ? <i className="stk" style={{height: Math.max(3,(uu(i)/scale)*100)+'%'}}>
+                  {STACK.map((s,j)=>stacks[i][j]>0 && <b key={s.k} style={{height:(stacks[i][j]/h*100)+'%', background:s.c}}/>)}
+                </i>
+              : <i className={h>0 ? 'grey' : 'zero'}
+                   style={{height: h>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '2px'}}/>}
           </span>
         ))}
       </div>
@@ -519,13 +507,12 @@ function WeekChart({weeks, spans, widths, series, stacks, caps, noCap, pinned, o
       </div>
       <div className="wk-key">
         {STACK.map(s=><span key={s.k}><i style={{background:s.c}}/>{s.k}</span>)}
-        <span><i className="dash"/>Standing</span>
       </div>
       <div className="wk-read">
         {show!=null && series.length
           ? <><span className="wk-wk">{label(show)}</span>
               <b style={{color: noCap ? 'inherit' : 'var(--'+band(uu(show))+')'}}>{noCap?'—':pct(uu(show))+'%'}</b>
-              <span className="wk-h"> · {fmt(series[show])} hrs · {parts(show)}</span>
+              <span className="wk-h"> · {fmt(series[show])} hrs · {STACK.map((s,j)=>s.k+' '+fmt(stacks[show][j])).join(' · ')}</span>
               {pinned!=null && hov==null && <span className="wk-pin"> pinned</span>}</>
           : null}
       </div>
