@@ -320,6 +320,11 @@ loadCSSFromString(`
   .cap .wk-b > i.green { background:var(--green); } .cap .wk-b > i.amber { background:var(--amber); }
   .cap .wk-b > i.red { background:var(--red); } .cap .wk-b > i.grey { background:#ccc; }
   .cap .wk-b > i.zero { background:var(--line); }
+  .cap .wk-b > i.stk { display:flex; flex-direction:column-reverse; overflow:hidden; background:none; }
+  .cap .wk-b > i.stk > b { display:block; width:100%; flex-shrink:0; }
+  .cap .wk-key { display:flex; gap:10px; margin-top:5px; font-size:10px; color:var(--muted); }
+  .cap .wk-key span { display:inline-flex; align-items:center; gap:4px; }
+  .cap .wk-key i { width:8px; height:8px; border-radius:2px; display:inline-block; }
 
   .cap .wk-ax { display:flex; gap:3px; margin-top:5px; }
   .cap .wk-ax span { flex:1; font-size:9.5px; color:var(--muted); white-space:nowrap; }
@@ -457,7 +462,15 @@ function lookupText(cell){
 // `spans` clips each week to the days inside the selected period, so a bar is named
 // after the days it actually charges. Without it a Q4 view labelled its first bar
 // "Sep", because the week of 28 Sep carries 1–2 Oct.
-function WeekChart({weeks, spans, widths, series, caps, noCap, pinned, onPick, scale}){
+// Each bar is stacked: standing work at the bottom, then Quarterly Planned, then
+// Unplanned on top. Colours name the kind of work; the threshold line and the
+// read-out carry how loaded the week is.
+const STACK = [
+  {k:'Standing',  c:'#a9a4c2'},
+  {k:'Planned',   c:'#5b3df5'},
+  {k:'Unplanned', c:'#e8618c'},
+];
+function WeekChart({weeks, spans, widths, series, stacks, caps, noCap, pinned, onPick, scale}){
   const [hov, setHov] = useState(null);
   const show = hov!=null ? hov : pinned;
   const uu = i => (noCap || !caps[i]) ? 0 : series[i]/caps[i];
@@ -472,9 +485,14 @@ function WeekChart({weeks, spans, widths, series, caps, noCap, pinned, onPick, s
             style={{flexGrow: widths[i]}}
             onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
             onClick={()=>onPick(i)}
-            title={label(i)+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')}>
-            <i className={h>0 ? (noCap?'grey':band(uu(i))) : 'zero'}
-               style={{height: h>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '2px'}}/>
+            title={label(i)+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')
+                   +(h>0 ? ' ('+STACK.map((s,j)=>s.k+' '+fmt(stacks[i][j])).join(' · ')+')' : '')}>
+            {h>0 && !noCap
+              ? <i className="stk" style={{height: Math.max(3,(uu(i)/scale)*100)+'%'}}>
+                  {STACK.map((s,j)=>stacks[i][j]>0 && <b key={s.k} style={{height:(stacks[i][j]/h*100)+'%', background:s.c}}/>)}
+                </i>
+              : <i className={h>0 ? 'grey' : 'zero'}
+                   style={{height: h>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '2px'}}/>}
           </span>
         ))}
       </div>
@@ -487,11 +505,14 @@ function WeekChart({weeks, spans, widths, series, caps, noCap, pinned, onPick, s
             {newMonth ? dt.toLocaleDateString(undefined,{month:'short',timeZone:'UTC'}) : ''}</span>;
         })}
       </div>
+      <div className="wk-key">
+        {STACK.map(s=><span key={s.k}><i style={{background:s.c}}/>{s.k}</span>)}
+      </div>
       <div className="wk-read">
         {show!=null && series.length
           ? <><span className="wk-wk">{label(show)}</span>
-              <b>{noCap?'—':pct(uu(show))+'%'}</b>
-              <span className="wk-h"> · {fmt(series[show])} hrs</span>
+              <b style={{color: noCap ? 'inherit' : 'var(--'+band(uu(show))+')'}}>{noCap?'—':pct(uu(show))+'%'}</b>
+              <span className="wk-h"> · {fmt(series[show])} hrs · {STACK.map((s,j)=>s.k+' '+fmt(stacks[show][j])).join(' · ')}</span>
               {pinned!=null && hov==null && <span className="wk-pin"> pinned</span>}</>
           : null}
       </div>
@@ -1283,6 +1304,21 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return m;
   },[rows, rowDays, bucketOfDay, hasDates]);
 
+  // The same, counting only Unplanned Request hours, so each bar can be split.
+  const weeklyUnpByTeam = useMemo(()=>{
+    const m = new Map();
+    if(!hasDates) return m;
+    rows.forEach(x=>{
+      if(x.isDropped || !x.unplanned) return;
+      const dm = rowDays.get(x.id);
+      if(!dm) return;
+      const t = m.get(x.coe) || new Map();
+      dm.forEach((h,d)=>{ const w = bucketOfDay.get(d); if(w!=null) t.set(w, (t.get(w)||0) + h); });
+      m.set(x.coe, t);
+    });
+    return m;
+  },[rows, rowDays, bucketOfDay, hasDates]);
+
   // Work with no dates cannot be placed in any week, so it sits outside every figure
   // above. Listed rather than dropped, because it is real committed hours.
   const undated = useMemo(()=>{
@@ -1821,7 +1857,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
           const ppl = peopleOf(t), fte = fteOf(t);
           // Percentage and colour run off full capacity.
           const otherWk = weekBuckets.map(b=>otherWeekOf(t,b));
-          const series = selWeeks.map((w,i)=>otherWk[i] + membersOf(t).reduce((a,m)=>a+((weeklyByTeam.get(m)||new Map()).get(w)||0), 0));
+          const weekSum = (src, w) => membersOf(t).reduce((a,m)=>a+((src.get(m)||new Map()).get(w)||0), 0);
+          const series = selWeeks.map((w,i)=>otherWk[i] + weekSum(weeklyByTeam, w));
+          // [standing, planned, unplanned] per week, bottom to top of each bar.
+          const stacks = selWeeks.map((w,i)=>{
+            const unp = weekSum(weeklyUnpByTeam, w);
+            return [otherWk[i], Math.max(0, weekSum(weeklyByTeam, w)-unp), unp];
+          });
           const weekCaps = weekBuckets.map(b=>weekCapOf(t,b));
           const ratios = series.map((h,i)=>weekCaps[i]>0 ? h/weekCaps[i] : 0);
           const peakIdx = ratios.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
@@ -1866,7 +1908,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 </div>
                 {hasDates && series.length>0 && <WeekChart
                   weeks={selWeeks} spans={weekSpans} widths={weekWidths}
-                  series={series} caps={weekCaps} noCap={noCap}
+                  series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
                   pinned={pinIdx} scale={wkScale}
                   onPick={i=>pickWeek(t.n,i)}/>}
                 {(()=>{
