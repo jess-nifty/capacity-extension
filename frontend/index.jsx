@@ -245,7 +245,7 @@ loadCSSFromString(`
     border-radius:4px; padding:1px 5px; }
   .cap .unpl { font-size:10px; font-weight:700; color:#8a6100; background:#fff4d1;
     border-radius:4px; padding:1px 5px; white-space:nowrap; }
-  .cap table.sizes tr.unp td { color:#8a6100; font-weight:600; border-bottom:none; padding-top:0; }
+  .cap table.sizes tr.avail td { color:var(--muted); font-weight:600; border-bottom:none; }
   .cap .combo-of { font-size:11.5px; color:var(--muted); margin:2px 0 8px; }
   .cap .leadtag { font-size:10.5px; color:var(--muted); font-style:italic; white-space:nowrap; }
   .cap .plist li.pp { display:flex; align-items:baseline; gap:8px; }
@@ -1589,13 +1589,10 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // both sizes. Unsized work gets its own row rather than disappearing.
   // With `days` (a pinned week) it counts only those days, so the table follows
   // the week the card is showing; without, the whole selection.
-  // The result also carries `unplanned`: how many of those hours are Unplanned Requests.
   const sizeBreakdownOf = (t, days) => {
     const bySize = new Map();
-    let unp = 0;
-    const add = (size, prog, h, unplanned) => {
+    const add = (size, prog, h) => {
       if(h<=0) return;
-      if(unplanned) unp += h;
       const k = size || '—';
       const r = bySize.get(k) || {size:k, progs:new Set(), hrs:0};
       r.progs.add(prog);
@@ -1610,13 +1607,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         if(!dm) return;
         let h = 0;
         dm.forEach((v,d)=>{ if(want.has(d)) h += v; });
-        add(x.size, x.pid || x.pname, h, x.unplanned);
+        add(x.size, x.pid || x.pname, h);
       });
     } else {
-      membersOf(t).forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>add(pp.size, pp.id || pp.name, pp.hrs, pp.unplanned)));
+      membersOf(t).forEach(n=>(teamProgs.get(n)||[]).forEach(pp=>add(pp.size, pp.id || pp.name, pp.hrs)));
     }
     const out = [...bySize.values()].sort((a,b)=>(SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5));
-    out.unplanned = unp;
     return out;
   };
   // Size tables folded shut, by card.
@@ -1965,9 +1961,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                       </tr>}
                       <tr className="tot"><td>Total</td><td className="n">{n}</td><td className="n">{fmt(h)}</td>
                         <td className="n" style={{color:(noCap||base<=0)?'inherit':BC[band(h/base)]}}>{share(h)}</td><td/></tr>
-                      {sizes.unplanned>0.5 && <tr className="unp" title="Hours from programmes marked Unplanned Request">
-                        <td colSpan={2}>of which unplanned</td><td className="n">{fmt(sizes.unplanned)}</td>
-                        <td className="n">{share(sizes.unplanned)}</td><td/></tr>}
+                      <tr className="avail" title={"This team's working hours for the "+(wkPinned?'pinned week':'selected period')+', net of holidays — the 100% every % above is measured against'}>
+                        <td colSpan={2}>Available Hours (100%)</td><td className="n">{noCap?'—':fmt(base)}</td>
+                        <td className="n">{noCap?'—':'100%'}</td><td/></tr>
                     </tbody>
                   </table></>;
                 })()}
