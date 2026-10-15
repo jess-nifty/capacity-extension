@@ -316,6 +316,9 @@ loadCSSFromString(`
     pointer-events:none; z-index:2; }
   .cap .wk-bars::after { content:''; position:absolute; left:0; right:0; top:var(--thr);
     border-top:1px dashed var(--ink); opacity:.4; pointer-events:none; }
+  .cap .wk-full { position:absolute; left:0; right:0; top:var(--full); border-top:1.5px solid var(--red);
+    pointer-events:none; z-index:1; }
+  .cap .wk-thr.full { top:var(--full); color:var(--red); }
   .cap .wk-b { flex:1; display:flex; align-items:flex-end; height:100%; cursor:default; }
   .cap .wk-b > i { display:block; width:100%; border-radius:3px 3px 0 0; background:var(--muted); }
   .cap .wk-b > i.green { background:var(--green); } .cap .wk-b > i.amber { background:var(--amber); }
@@ -467,9 +470,9 @@ function lookupText(cell){
 // Unplanned on top. Colours name the kind of work; the threshold line and the
 // read-out carry how loaded the week is.
 const STACK = [
-  {k:'Standing',  c:'#a9a4c2'},
-  {k:'Planned',   c:'#5b3df5'},
-  {k:'Unplanned', c:'#e8618c'},
+  {k:'Standing',  c:'#a3a3a3'},     // grey
+  {k:'Planned',   c:'#5b3df5'},     // the page's purple
+  {k:'Unplanned', c:'#8a6100'},     // the brown of the Unplanned tag
 ];
 // `stacked` draws the by-type version; without it, each bar is one block coloured
 // by load band, as before. Each card shows both.
@@ -480,8 +483,10 @@ function WeekChart({weeks, spans, widths, series, stacks, stacked, caps, noCap, 
   const label = i => dayRange(spans[i][0], spans[i][1]);
   return (
     <div className={'wk'+(stacked?' wk-2':'')}>
-      <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%'}}>
+      <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%', '--full': (100-(1/scale)*100)+'%'}}>
         <span className="wk-thr">70%</span>
+        {/* The stacked chart also marks 100%, so it shows exactly where a week runs out. */}
+        {stacked && <><span className="wk-full"/><span className="wk-thr full">100%</span></>}
         {series.map((h,i)=>(
           <span key={weeks[i]}
             className={'wk-b'+(i===pinned?' pinned':'')}
