@@ -308,8 +308,10 @@ loadCSSFromString(`
     opacity:0; visibility:hidden; transform:translateY(-3px); transition:opacity .12s, transform .12s; }
   .cap .tagwrap:hover .tip { opacity:1; visibility:visible; transform:translateY(0); }
   .cap .wk { margin:18px 0 2px; }
-  .cap .wk.wk-2 { margin-top:8px; }
-  .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:62px;
+  .cap .wk-b > i.stk.clip { position:relative; }
+  .cap .wk-b > i.stk.clip::after { content:''; position:absolute; top:0; left:0; right:0; height:7px;
+    background:repeating-linear-gradient(135deg, #fff 0 2px, transparent 2px 5px); }
+  .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:120px;
     border-bottom:1px solid var(--line); }
   .cap .wk-thr { position:absolute; right:0; top:var(--thr); transform:translateY(-50%); font-size:9px;
     font-weight:700; color:var(--muted); background:var(--card); padding:0 3px; border-radius:3px;
@@ -476,13 +478,17 @@ const STACK = [
 ];
 // `stacked` draws the by-type version; without it, each bar is one block coloured
 // by load band, as before. Each card shows both.
-function WeekChart({weeks, spans, widths, series, stacks, stacked, caps, noCap, pinned, onPick, scale}){
+// Every card's chart runs on the same scale, top = 200%, so the 70% and 100% lines
+// sit at the same height across all teams and the cards can be compared at a glance.
+// A week above 200% is drawn to the top and flagged; the read-out gives its real %.
+const CHART_TOP = 2;
+function WeekChart({weeks, spans, widths, series, stacks, stacked, caps, noCap, pinned, onPick, scale=CHART_TOP}){
   const [hov, setHov] = useState(null);
   const show = hov!=null ? hov : pinned;
   const uu = i => (noCap || !caps[i]) ? 0 : series[i]/caps[i];
   const label = i => dayRange(spans[i][0], spans[i][1]);
   return (
-    <div className={'wk'+(stacked?' wk-2':'')}>
+    <div className="wk">
       <div className="wk-bars" style={{'--thr': (100-(0.70/scale)*100)+'%', '--full': (100-(1/scale)*100)+'%'}}>
         <span className="wk-thr">70%</span>
         {/* The stacked chart also marks 100%, so it shows exactly where a week runs out. */}
@@ -496,11 +502,11 @@ function WeekChart({weeks, spans, widths, series, stacks, stacked, caps, noCap, 
             title={label(i)+' — '+(noCap?'no capacity set':pct(uu(i))+'% · '+fmt(series[i])+' hrs')
                    +(stacked && h>0 ? ' ('+STACK.map((s,j)=>s.k+' '+fmt(stacks[i][j])).join(' · ')+')' : '')}>
             {stacked && h>0 && !noCap
-              ? <i className="stk" style={{height: Math.max(3,(uu(i)/scale)*100)+'%'}}>
+              ? <i className={'stk'+(uu(i)>scale?' clip':'')} style={{height: Math.min(100, Math.max(3,(uu(i)/scale)*100))+'%'}}>
                   {STACK.map((s,j)=>stacks[i][j]>0 && <b key={s.k} style={{height:(stacks[i][j]/h*100)+'%', background:s.c}}/>)}
                 </i>
               : <i className={h>0 ? (noCap?'grey':band(uu(i))) : 'zero'}
-                   style={{height: h>0 ? Math.max(3,(uu(i)/scale)*100)+'%' : '2px'}}/>}
+                   style={{height: h>0 ? Math.min(100, Math.max(3,(uu(i)/scale)*100))+'%' : '2px'}}/>}
           </span>
         ))}
       </div>
@@ -1623,14 +1629,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return next;
   });
 
-  // Stacked by-type charts, folded shut until opened, by card.
-  const [openTypes, setOpenTypes] = useState(()=>new Set());
-  const toggleTypes = n => setOpenTypes(prev=>{
-    const next = new Set(prev);
-    next.has(n) ? next.delete(n) : next.add(n);
-    return next;
-  });
-
   const [openProgs, setOpenProgs] = useState(()=>new Set());
   const toggleProgs = n => setOpenProgs(prev=>{
     const next = new Set(prev);
@@ -1878,12 +1876,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
           });
           const weekCaps = weekBuckets.map(b=>weekCapOf(t,b));
           const ratios = series.map((h,i)=>weekCaps[i]>0 ? h/weekCaps[i] : 0);
-          const peakIdx = ratios.reduce((bi,v,i,arr)=>v>arr[bi]?i:bi, 0);
-          const peakU = (noCap||!series.length) ? null : ratios[peakIdx];
           const uQ = noCap? null : load/full;
-          // Top of the chart is 100%, or the peak when it exceeds — plus a tenth of
-          // headroom so the tallest bar never crowds the text above it.
-          const wkScale = Math.max(1, peakU||0) * 1.1;
           const pinIdx = (pinnedWk.get(t.n)!=null && pinnedWk.get(t.n)<series.length) ? pinnedWk.get(t.n) : null;
           const u = (pinIdx!=null && !noCap) ? ratios[pinIdx] : uQ;
           const bnd = (u==null)?'grey':band(u);
@@ -1918,11 +1911,10 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     ? 'Week of '+dayRange(weekSpans[pinIdx][0], weekSpans[pinIdx][1])+' · '+avgLabel.toLowerCase()+' '+(uQ==null?'—':pct(uQ)+'%')
                     : (hasDates && !series.length ? 'No dated work in this selection' : avgLabel)}
                 </div>
-                {hasDates && series.length>0 && <WeekChart
+                {hasDates && series.length>0 && <WeekChart stacked
                   weeks={selWeeks} spans={weekSpans} widths={weekWidths}
                   series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
-                  pinned={pinIdx} scale={wkScale}
-                  onPick={i=>pickWeek(t.n,i)}/>}
+                  pinned={pinIdx} onPick={i=>pickWeek(t.n,i)}/>}
                 {(()=>{
                   // A pinned week narrows the table to that week and its capacity,
                   // matching the big figure above it.
@@ -1962,22 +1954,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                       <tr className="tot"><td>Total</td><td className="n">{n}</td><td className="n">{fmt(h)}</td>
                         <td className="n" style={{color:(noCap||base<=0)?'inherit':BC[band(h/base)]}}>{share(h)}</td><td/></tr>
                       <tr className="avail" title={"This team's working hours for the "+(wkPinned?'pinned week':'selected period')+', net of holidays — the 100% every % above is measured against'}>
-                        <td colSpan={2}>Available Hours (100%)</td><td className="n">{noCap?'—':fmt(base)}</td>
+                        <td colSpan={2}>Available Hours</td><td className="n">{noCap?'—':fmt(base)}</td>
                         <td className="n">{noCap?'—':'100%'}</td><td/></tr>
                     </tbody>
                   </table></>;
                 })()}
-                {hasDates && series.length>0 && <>
-                  <button className="sz-toggle" onClick={()=>toggleTypes(t.n)}
-                    aria-expanded={openTypes.has(t.n)}
-                    title={openTypes.has(t.n)?'Hide the weekly split by type':'Show each week split into standing, planned and unplanned work'}>
-                    By type<span>{openTypes.has(t.n)?'▾':'▸'}</span></button>
-                  {openTypes.has(t.n) && <WeekChart stacked
-                    weeks={selWeeks} spans={weekSpans} widths={weekWidths}
-                    series={series} stacks={stacks} caps={weekCaps} noCap={noCap}
-                    pinned={pinIdx} scale={wkScale}
-                    onPick={i=>pickWeek(t.n,i)}/>}
-                </>}
                 </>}
               </div>
               {!isCol && <div className="metrics">
