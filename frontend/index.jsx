@@ -246,7 +246,6 @@ loadCSSFromString(`
   .cap .unpl { font-size:10px; font-weight:700; color:#8a6100; background:#fff4d1;
     border-radius:4px; padding:1px 5px; white-space:nowrap; }
   .cap table.sizes tr.avail td { color:var(--muted); font-weight:600; border-bottom:none; }
-  .cap .combo-of { font-size:11.5px; color:var(--muted); margin:2px 0 8px; }
   .cap .leadtag { font-size:10.5px; color:var(--muted); font-style:italic; white-space:nowrap; }
   .cap .plist li.pp { display:flex; align-items:baseline; gap:8px; }
   .cap .plist li.pp a { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -1889,14 +1888,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 <button className="thead" onClick={()=>toggleCollapse(t.n)}
                   onContextMenu={e=>{ e.preventDefault(); setMenu({x:e.clientX, y:e.clientY}); }}
                   title={(isCol?'Expand this team':'Collapse this team')+' · right-click for all teams'}>
-                  <span className="tname">{t.n}</span>
+                  {/* A combined card names its teams on hover only, so its chart lines up with the rest. */}
+                  <span className="tname" title={t.parts ? t.members.join(' + ') : undefined}>{t.n}</span>
                   <span className="thead-r">
                     {isCol && <span className="thead-pct" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</span>}
                     <span className="tcaret">{isCol?'▸':'▾'}</span>
                   </span>
                 </button>
                 {!isCol && <>
-                {t.parts && <div className="combo-of">{t.members.join(' + ')}</div>}
                 <div className="urow">
                   <div className="ubig" style={{color:noCap?'#aaa':BC[bnd]}}>{u==null?'—':pct(u)+'%'}</div>
                   {diagnosis.get(t.n)
