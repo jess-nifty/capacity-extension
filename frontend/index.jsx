@@ -170,7 +170,7 @@ loadCSSFromString(`
   .cap .panel-actions { display:flex; gap:6px; padding:2px 2px 8px; margin-bottom:6px; border-bottom:1px solid var(--line); }
   .cap .panel-actions button { flex:1; padding:5px 8px; font-size:12px; border-radius:7px; }
   .cap .panel-actions button:disabled { opacity:.4; cursor:default; }
-  .cap .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:0 0 24px; }
+  .cap .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:0 0 24px; }
   .cap .kpi { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:15px 17px; }
   .cap .kpi .n { font-size:26px; font-weight:700; letter-spacing:-1px; }
   .cap .kpi .n small { font-size:13px; font-weight:600; color:var(--muted); }
@@ -388,7 +388,7 @@ loadCSSFromString(`
   .cap a.plain { color:var(--purple); text-decoration:none; font-weight:600; }
   .cap a.plain:hover { text-decoration:underline; }
   @media (prefers-color-scheme: dark){ .cap .pfoot { background:#211d33; } .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
-  @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:repeat(2,1fr);} }
+  @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:1fr;} }
   @media(max-width:640px){ .cap .grid{grid-template-columns:1fr;} }
 `);
 
@@ -1915,7 +1915,6 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
       <div className="kpis">
         <div className="kpi"><div className="n">{progInView}</div><div className="l">Programs counted</div></div>
-        <div className="kpi"><div className="n">{shown.length}</div><div className="l">Teams shown</div></div>
         <div className="kpi"><div className="n">{fmt(totCap)} <small>hrs</small></div><div className="l">Usable capacity, selected quarter(s)</div></div>
         <div className="kpi"><div className="n">{fmt(totSub)} <small>hrs</small></div><div className="l">Hours counted (selected)</div></div>
       </div>
