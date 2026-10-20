@@ -170,11 +170,12 @@ loadCSSFromString(`
   .cap .panel-actions { display:flex; gap:6px; padding:2px 2px 8px; margin-bottom:6px; border-bottom:1px solid var(--line); }
   .cap .panel-actions button { flex:1; padding:5px 8px; font-size:12px; border-radius:7px; }
   .cap .panel-actions button:disabled { opacity:.4; cursor:default; }
-  .cap .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:0 0 24px; }
-  .cap .kpi { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:15px 17px; }
-  .cap .kpi .n { font-size:26px; font-weight:700; letter-spacing:-1px; }
-  .cap .kpi .n small { font-size:13px; font-weight:600; color:var(--muted); }
-  .cap .kpi .l { font-size:12px; color:var(--muted); margin-top:2px; }
+  .cap .kpis { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px; }
+  .cap .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:6px 12px;
+    display:flex; align-items:baseline; gap:7px; }
+  .cap .kpi .n { font-size:17px; font-weight:700; letter-spacing:-.4px; white-space:nowrap; }
+  .cap .kpi .n small { font-size:11px; font-weight:600; color:var(--muted); }
+  .cap .kpi .l { font-size:12px; color:var(--muted); }
   .cap .st { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--purple); margin:26px 0 12px; }
   .cap .st-toggle { display:flex; align-items:center; gap:10px; background:transparent; border:none;
     padding:0; border-radius:0; cursor:pointer; text-align:left; }
@@ -389,7 +390,7 @@ loadCSSFromString(`
   .cap a.plain:hover { text-decoration:underline; }
   @media (prefers-color-scheme: dark){ .cap .pfoot { background:#211d33; } .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
   @media(max-width:1400px){ .cap .grid{grid-template-columns:repeat(3,1fr);} }
-  @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:1fr;} }
+  @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} }
   @media(max-width:640px){ .cap .grid{grid-template-columns:1fr;} }
 `);
 
