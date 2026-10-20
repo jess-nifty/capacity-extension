@@ -195,9 +195,9 @@ loadCSSFromString(`
   .cap th.acc { color:var(--green); }
   .cap tr:last-child td { border-bottom:none; }
   .cap tr.total td { background:#faf9ff; font-weight:700; }
-  .cap .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start; }
+  .cap .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; align-items:start; }
   .cap .team { background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden; }
-  .cap .team .top { padding:14px 16px 12px; }
+  .cap .team .top { padding:10px 12px 8px; }
   .cap .tname { font-size:15px; font-weight:700; margin:0 0 6px; min-height:20px; }
   .cap .thead { width:100%; display:flex; align-items:center; gap:10px; background:transparent; border:none;
     padding:0; margin:0 0 6px; text-align:left; cursor:pointer; border-radius:0; }
@@ -241,7 +241,7 @@ loadCSSFromString(`
   .cap .plist li.prog .pend { margin-left:auto; display:inline-flex; align-items:baseline; gap:8px; flex-shrink:0; }
   .cap .plist li.prog .unpl { flex-shrink:0; }
   .cap .plist li.prog .wk-h { font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .cap .sz-toggle { display:flex; align-items:center; gap:6px; width:100%; margin:12px 0 0; padding:0;
+  .cap .sz-toggle { display:flex; align-items:center; gap:6px; width:100%; margin:6px 0 0; padding:0;
     background:transparent; border:none; border-radius:0; font-size:11.5px; font-weight:700; color:var(--ink);
     text-align:left; cursor:pointer; }
   .cap .sz-toggle span { margin-left:auto; color:var(--purple); font-size:12px; }
@@ -316,8 +316,8 @@ loadCSSFromString(`
   .cap .astat { font-size:11.5px; color:var(--green); }
   .cap .astat.err { color:var(--red); }
   .cap .urow { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-  .cap .ubig { font-size:32px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
-  .cap .ucap { font-size:12px; color:var(--muted); margin-top:2px; }
+  .cap .ubig { font-size:24px; font-weight:800; letter-spacing:-1px; line-height:1; }
+  .cap .ucap { font-size:11px; color:var(--muted); margin-top:1px; }
   /* The reasoning hangs off the status tag rather than occupying a line of its own.
      Anchored right and below so it stays inside the card, which clips overflow. */
   .cap .tagwrap { position:relative; display:inline-flex; }
@@ -327,11 +327,11 @@ loadCSSFromString(`
     border-radius:9px; box-shadow:0 10px 26px rgba(20,14,45,.28); text-align:left;
     opacity:0; visibility:hidden; transform:translateY(-3px); transition:opacity .12s, transform .12s; }
   .cap .tagwrap:hover .tip { opacity:1; visibility:visible; transform:translateY(0); }
-  .cap .wk { margin:18px 0 2px; }
+  .cap .wk { margin:10px 0 0; }
   .cap .wk-b > i.stk.clip { position:relative; }
   .cap .wk-b > i.stk.clip::after { content:''; position:absolute; top:0; left:0; right:0; height:7px;
     background:repeating-linear-gradient(135deg, #fff 0 2px, transparent 2px 5px); }
-  .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:3px; height:120px;
+  .cap .wk-bars { position:relative; display:flex; align-items:flex-end; gap:2px; height:80px;
     border-bottom:1px solid var(--line); }
   .cap .wk-thr { position:absolute; right:0; top:var(--thr); transform:translateY(-50%); font-size:9px;
     font-weight:700; color:var(--muted); background:var(--card); padding:0 3px; border-radius:3px;
@@ -348,13 +348,13 @@ loadCSSFromString(`
   .cap .wk-b > i.zero { background:var(--line); }
   .cap .wk-b > i.stk { display:flex; flex-direction:column-reverse; overflow:hidden; background:none; }
   .cap .wk-b > i.stk > b { display:block; width:100%; flex-shrink:0; }
-  .cap .wk-key { display:flex; gap:10px; margin-top:5px; font-size:10px; color:var(--muted); }
+  .cap .wk-key { display:flex; gap:10px; margin-top:3px; font-size:10px; color:var(--muted); }
   .cap .wk-key span { display:inline-flex; align-items:center; gap:4px; }
   .cap .wk-key i { width:8px; height:8px; border-radius:2px; display:inline-block; }
 
-  .cap .wk-ax { display:flex; gap:3px; margin-top:5px; }
+  .cap .wk-ax { display:flex; gap:2px; margin-top:3px; }
   .cap .wk-ax span { flex:1; font-size:9.5px; color:var(--muted); white-space:nowrap; }
-  .cap .wk-read { font-size:11.5px; color:var(--ink); margin:7px 0 0; min-height:17px; }
+  .cap .wk-read { font-size:11px; color:var(--ink); margin:4px 0 0; min-height:15px; }
   .cap .wk-read b { font-variant-numeric:tabular-nums; }
   .cap .wk-wk { display:inline-block; background:var(--purple-soft); color:var(--purple); font-weight:700;
     border-radius:5px; padding:1px 7px; margin-right:7px; font-size:11px; }
@@ -388,6 +388,7 @@ loadCSSFromString(`
   .cap a.plain { color:var(--purple); text-decoration:none; font-weight:600; }
   .cap a.plain:hover { text-decoration:underline; }
   @media (prefers-color-scheme: dark){ .cap .pfoot { background:#211d33; } .cap{ --ink:#e6e3f5; --muted:#a29fbd; --line:#33304a; --bg:#15131f; --card:#1e1b2e; --purple-soft:#241f3d; } }
+  @media(max-width:1400px){ .cap .grid{grid-template-columns:repeat(3,1fr);} }
   @media(max-width:980px){ .cap .grid{grid-template-columns:repeat(2,1fr);} .cap .kpis{grid-template-columns:1fr;} }
   @media(max-width:640px){ .cap .grid{grid-template-columns:1fr;} }
 `);
@@ -1689,9 +1690,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     const out = [...bySize.values()].sort((a,b)=>(SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5));
     return out;
   };
-  // Size tables folded shut, by card.
-  const [closedSizes, setClosedSizes] = useState(()=>new Set());
-  const toggleSizes = n => setClosedSizes(prev=>{
+  // Size tables opened, by card. Closed by default to keep the cards short.
+  const [openSizes, setOpenSizes] = useState(()=>new Set());
+  const toggleSizes = n => setOpenSizes(prev=>{
     const next = new Set(prev);
     next.has(n) ? next.delete(n) : next.add(n);
     return next;
@@ -2004,7 +2005,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                   const wkPinned = pinIdx!=null;
                   const sizes = sizeBreakdownOf(t, wkPinned ? weekBuckets[pinIdx].days : null);
                   const base = wkPinned ? weekCaps[pinIdx] : full;
-                  const open = !closedSizes.has(t.n);
+                  const open = openSizes.has(t.n);
                   const head = <button className="sz-toggle" onClick={()=>toggleSizes(t.n)}
                       aria-expanded={open} title={open?'Hide the size breakdown':'Show the size breakdown'}>
                       By size{wkPinned ? ' · week of '+dayRange(weekSpans[pinIdx][0], weekSpans[pinIdx][1]) : ''}
