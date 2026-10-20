@@ -1,5 +1,5 @@
 import {initializeBlock, useBase, useRecords, loadCSSFromString} from '@airtable/blocks/interface/ui';
-import React, {useState, useMemo} from 'react';
+import React, {useState, useMemo, useEffect} from 'react';
 
 /*
   Capacity Overview — Interface Extension
@@ -55,6 +55,23 @@ const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knd
 const TYPE_PLANNED = 'Quarterly Planned', TYPE_UNPLANNED = 'Unplanned Request';
 const TYPE_OPTIONS = [TYPE_PLANNED, TYPE_UNPLANNED];
 const isUnplanned = name => norm(name)===norm(TYPE_UNPLANNED);
+
+// Sticky filters. Each person's filter choices are kept in their own browser, so
+// they come back after a reload and nobody changes anyone else's view. Storage can
+// be unavailable (private windows, blocked site data), in which case filters simply
+// start from their defaults as before.
+const STICKY = 'capacity-overview:';
+function useSticky(key, init, io={}){
+  const save = io.save || (v=>v), load = io.load || (v=>v);
+  const [v, setV] = useState(()=>{
+    try{ const raw = window.localStorage.getItem(STICKY+key); if(raw!=null) return load(JSON.parse(raw)); }catch(e){}
+    return typeof init==='function' ? init() : init;
+  });
+  useEffect(()=>{ try{ window.localStorage.setItem(STICKY+key, JSON.stringify(save(v))); }catch(e){} },[v]);
+  return [v, setV];
+}
+const SET_IO = {save: s=>s==null ? null : [...s], load: a=>Array.isArray(a) ? new Set(a) : null};
+const clearSticky = () => { try{ Object.keys(window.localStorage).filter(k=>k.startsWith(STICKY)).forEach(k=>window.localStorage.removeItem(k)); }catch(e){} };
 
 // Trade Off, a checkbox on Programs. The filter offers both sides; both are on by default.
 const TO_YES = 'Trade off', TO_NO = 'Not a trade off';
@@ -993,7 +1010,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const allocRecords = useRecords(allocTable);
   const progRecords = useRecords(progTable);
 
-  const [sortMode, setSortMode] = useState('az');
+  const [sortMode, setSortMode] = useSticky('sort', 'az');
 
   // Capacity is a roll-up of the team's people, so the headcount behind a number is
   // part of reading it. Names come off the link field itself — People does not need
@@ -1063,7 +1080,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return next;
   });
 
-  const [selT, setSelT] = useState(null);
+  const [selT, setSelT] = useSticky('teams', null, SET_IO);
   const teamNames = useMemo(()=>listed.map(t=>t.n).sort(),[listed]);
   // Everything except the teams that are off by default; null means "untouched",
   // so Reset drops back to this rather than to all-selected.
@@ -1171,13 +1188,15 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // timeline and the business-unit table all follow them; the Programs counted box
   // applies the same test through progPasses. Periods and day spreads are built from
   // every row, so switching a filter never takes a quarter out of the list.
-  const [selTy, setSelTy] = useState(()=>new Set(TYPE_OPTIONS));
-  const [selTo, setSelTo] = useState(()=>new Set(TO_OPTIONS));
+  const [selTy, setSelTy] = useSticky('type', ()=>new Set(TYPE_OPTIONS), {save:SET_IO.save, load:a=>SET_IO.load(a) || new Set(TYPE_OPTIONS)});
+  const [selTo, setSelTo] = useSticky('tradeoff', ()=>new Set(TO_OPTIONS), {save:SET_IO.save, load:a=>SET_IO.load(a) || new Set(TO_OPTIONS)});
   // Program filter, in one of two modes so it keeps its meaning when the quarters
   // change. 'out': the named programs are excluded and everything else shows,
   // including programs from a newly added quarter ("is not"; the default, with
   // nothing named). 'only': just the named programs show ("is"; reached by Clear).
-  const [progF, setProgF] = useState(()=>({mode:'out', names:new Set()}));
+  const [progF, setProgF] = useSticky('program', ()=>({mode:'out', names:new Set()}),
+    {save: f=>({mode:f.mode, names:[...f.names]}),
+     load: o=>({mode: o && o.mode==='only' ? 'only' : 'out', names: new Set((o && o.names) || [])})});
   const typeOn = hasType && selTy.size<TYPE_OPTIONS.length;
   const toOn = hasTradeOff && selTo.size<TO_OPTIONS.length;
   const progOn = progF.mode==='only' || progF.names.size>0;
@@ -1194,7 +1213,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
-  const [period, setPeriod] = useState('quarter');   // 'quarter' | 'month'
+  const [period, setPeriod] = useSticky('period', 'quarter');   // 'quarter' | 'month'
 
   // Built from the weeks work is actually scheduled in, so a period with work in it
   // is always selectable. Previously the options came from the program's Quarter
@@ -1246,7 +1265,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       .sort((a,b)=>periodSort(a)-periodSort(b));
   },[allRows, rowDays, progMap, period, hasDates]);
 
-  const [selQRaw, setSelQ] = useState(null);
+  const [selQRaw, setSelQ] = useSticky('periods', null, SET_IO);
   // Open on the quarter being planned, with every other quarter one click away in
   // the dropdown. Falls back to showing everything when that quarter has no work
   // in it, so the page can never open on an empty selection.
@@ -1870,6 +1889,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {(progOptions.length>0 || progOn) && <Dropdown label="Program" options={progOptions} selected={selProg}
           onToggle={toggleProg} onSetAll={setProgAll}
           onReset={()=>setProgF({mode:'out', names:new Set()})}/>}
+        {(selQRaw!=null || period!=='quarter' || selT!=null || typeOn || toOn || progOn || sortMode!=='az') &&
+          <button title="Put every filter back to its default. Your filters are otherwise remembered in this browser."
+            onClick={()=>{ clearSticky(); setPeriod('quarter'); setSelQ(null); setSelT(null);
+              setSelTy(new Set(TYPE_OPTIONS)); setSelTo(new Set(TO_OPTIONS));
+              setProgF({mode:'out', names:new Set()}); setSortMode('az'); }}>Reset filters</button>}
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
