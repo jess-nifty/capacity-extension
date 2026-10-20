@@ -1831,6 +1831,16 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // matching the hours. The Teams filter deliberately does not
   // apply — a program spans several CoEs, so there is no one team it belongs to.
   const progInView = useMemo(()=>{
+    // Months: a program's Quarter tag cannot say which month it falls in, so count
+    // the programs with counted hours scheduled in the selected months instead.
+    if(period==='month'){
+      const ids = new Set();
+      rows.forEach(x=>{
+        if(x.isDropped || x.test) return;
+        if((hoursInSel(x) || 0) > 0) ids.add(x.pid || x.pname);
+      });
+      return ids.size;
+    }
     let n = 0;
     progMap.forEach(pm=>{
       if(pm.test) return;
@@ -1839,7 +1849,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       if(inQ(qKey(pm.q, pm.y))) n++;
     });
     return n;
-  },[progMap, selQ, hasStatusField, selTy, selTo, progF, typeOn, toOn, progOn]);
+  },[progMap, selQ, hasStatusField, selTy, selTo, progF, typeOn, toOn, progOn, period, rows, rowDays, selBounds]);
   // Net of holidays and of part-weeks at the period edges, like the cards. A flat
   // 13 x weekly hours quietly disagreed with every figure underneath it. The base's
   // own 70% field sets the ratio, rather than assuming it is exactly 0.70.
