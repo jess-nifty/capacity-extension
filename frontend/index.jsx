@@ -15,7 +15,7 @@ const ALLOC = {table:'tblqCfUqS0Uv9cAHY', coe:'fldQfjuOcQN3OEsqI', sub:'fldI3EvQ
               size:'fld3XLGMXBIybT2E0', type:'fldBShpMgARfxWXnl'};
 // Estimated Sizing rows are named "<Team> - <size>", so the size is the tail.
 const sizeOf = n => { const m = /[-–]\s*(XS|S|M|L|XL)\s*$/i.exec(String(n||'')); return m ? m[1].toUpperCase() : null; };
-// A team's programme list runs largest size first, then by hours within a size;
+// A team's program list runs largest size first, then by hours within a size;
 // anything without a size goes last.
 const SIZE_RANK = {XL:0, L:1, M:2, S:3, XS:4};
 const bySizeThenHours = (a,b) => (SIZE_RANK[a.size] ?? 5) - (SIZE_RANK[b.size] ?? 5) || b.hrs-a.hrs;
@@ -35,7 +35,7 @@ const ASSIGN = {table:'tbljJDapNeW2nR2vj', person:'fldfwIe0iGghiJPpX', coe:'flds
                 start:'fldMJc0lJTHzjvF01', end:'fldbtmWlHhjZ0esIn', split:'fld7Wvl0mUe0EoDGo'};
 
 // Team Other Allocation. A share of a whole team's hours set aside for work outside
-// programmes (BAU, admin, internal projects) for a date range — "15% of Paid Media,
+// programs (BAU, admin, internal projects) for a date range — "15% of Paid Media,
 // 1 Oct–31 Dec". On each day in the range that share comes off the team's capacity.
 // No Start Date means from the beginning, no End Date means ongoing; rows for the
 // same team that overlap add up, capped at 100%.
@@ -50,7 +50,7 @@ const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knd
               quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN',
               type:'fldtWanc3C9gK753M', tradeoff:'fldl471hpuGXxUffT'};
 
-// Planned / Unplanned, on Programs; allocations carry a lookup of it. A programme
+// Planned / Unplanned, on Programs; allocations carry a lookup of it. A program
 // with neither choice set is treated as planned, the way nearly all work is.
 const TYPE_PLANNED = 'Quarterly Planned', TYPE_UNPLANNED = 'Unplanned Request';
 const TYPE_OPTIONS = [TYPE_PLANNED, TYPE_UNPLANNED];
@@ -63,7 +63,7 @@ const TO_OPTIONS = [TO_YES, TO_NO];
 const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','YAds','Fantasy'];
 const WEEKS = 13;
 
-// Only programmes the team has taken on count: Capacity Planning, Approved for Brief &
+// Only programs the team has taken on count: Capacity Planning, Approved for Brief &
 // Strategy and In Production. Everything else — Backlog, Submitted, Sent Back, In Review,
 // Rejected, Cancelled, or no status at all — is left out of every figure. This differs
 // from the "Accepted & Submitted Capacity Planning" dashboard, which counts submitted
@@ -409,7 +409,7 @@ function lookupDate(cell){
 // isn't. Bucketing on a bare 'Q4' merged Q4 2026 with any other year's Q4.
 function qKey(q, y){ return q ? (y ? q+' '+y : q) : UNASSIGNED; }
 // Demand is placed by when the work is actually scheduled, not by the quarter its
-// programme is tagged to. The two disagree badly: programmes tagged Q4 routinely
+// program is tagged to. The two disagree badly: programs tagged Q4 routinely
 // have work running in Q3, or in Q1 of the following year. Hours are spread evenly
 // across the Mondays between Est. Work Start and End — the same method the native
 // capacity page uses — and only the weeks landing inside the selection are counted.
@@ -809,7 +809,7 @@ function OtherEditor({rows, teams, table, defaults}){
   const addDraft = () => setDrafts(ds=>[...ds, {key: Date.now()+'-'+ds.length}]);
   const dropDraft = key => setDrafts(ds=>ds.filter(x=>x.key!==key));
   return <>
-    <div className="ahint">Standing work outside programmes, e.g. BAU or admin. That share of the team's hours counts as load on those dates, and programmes are added on top.</div>
+    <div className="ahint">Standing work outside programs, e.g. BAU or admin. That share of the team's hours counts as load on those dates, and programs are added on top.</div>
     {rows.map(r=><OtherRow key={r.id+'|'+r.name+'|'+r.team+'|'+r.pct+'|'+r.s+'|'+r.e} row={r} teams={teams} table={table} onStatus={onStatus}/>)}
     {drafts.map(k=><OtherRow key={k.key} table={table} teams={teams} onStatus={onStatus}
       row={{id:null, name:'', team: teams.length===1 ? teams[0].name : '', pct:null,
@@ -1144,7 +1144,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         qk: qKey(q, y),
         bu: pm ? pm.bu : 'Unassigned',
         crit: pm ? pm.crit : false,
-        // No programme record means we cannot confirm it is not a test or rejected —
+        // No program record means we cannot confirm it is not a test or rejected —
         // and it also means a filter on the Programs data source has hidden it. Either
         // way the allocation is dropped rather than counted on an assumption.
         test: pm ? pm.test : true,
@@ -1154,7 +1154,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         isAccepted: isCounted(st),
         // Without a status field every allocation is kept, rather than all of them dropping.
         isDropped: hasStatusField && !isCounted(st),
-        // Same order as status: the programme's own field, then the allocation's lookup.
+        // Same order as status: the program's own field, then the allocation's lookup.
         unplanned: isUnplanned((pm && pm.ty) ? pm.ty
                     : (hasAllocType ? lookupText(r.getCellValue(ALLOC.type)) : null)),
         tradeoff: pm ? pm.tradeoff : false,
@@ -1163,8 +1163,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         e: hasDates ? parseDate(r.getCellValue(ALLOC.end)) : null,
       };
     }).filter(x=>x.coe && !x.test && !isExcludedCoE(x.coe));
-    // ^ programmes with Testing Programs ticked are excluded here, and so is any
-    //   allocation whose programme the extension cannot see.
+    // ^ programs with Testing Programs ticked are excluded here, and so is any
+    //   allocation whose program the extension cannot see.
   },[allocRecords, progMap, hasAllocStatus, hasStatusField, hasAllocType, hasDates, hasSize]);
 
   // Type and Trade Off filters. Everything below reads `rows`, so cards, totals, the
@@ -1173,10 +1173,10 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // every row, so switching a filter never takes a quarter out of the list.
   const [selTy, setSelTy] = useState(()=>new Set(TYPE_OPTIONS));
   const [selTo, setSelTo] = useState(()=>new Set(TO_OPTIONS));
-  // Programme filter, in one of two modes so it keeps its meaning when the quarters
-  // change. 'out': the named programmes are excluded and everything else shows,
-  // including programmes from a newly added quarter ("is not"; the default, with
-  // nothing named). 'only': just the named programmes show ("is"; reached by Clear).
+  // Program filter, in one of two modes so it keeps its meaning when the quarters
+  // change. 'out': the named programs are excluded and everything else shows,
+  // including programs from a newly added quarter ("is not"; the default, with
+  // nothing named). 'only': just the named programs show ("is"; reached by Clear).
   const [progF, setProgF] = useState(()=>({mode:'out', names:new Set()}));
   const typeOn = hasType && selTy.size<TYPE_OPTIONS.length;
   const toOn = hasTradeOff && selTo.size<TO_OPTIONS.length;
@@ -1197,7 +1197,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const [period, setPeriod] = useState('quarter');   // 'quarter' | 'month'
 
   // Built from the weeks work is actually scheduled in, so a period with work in it
-  // is always selectable. Previously the options came from the programme's Quarter
+  // is always selectable. Previously the options came from the program's Quarter
   // tag, which meant work scheduled in an untagged period could not be reached.
   // Spread each allocation across its working days — weekdays that are not a public
   // holiday for that team — rather than evenly across its weeks. Dividing by weeks
@@ -1292,7 +1292,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return hit;
   };
 
-  // The Programme filter offers only programmes with counted hours in the selected
+  // The Program filter offers only programs with counted hours in the selected
   // period(s), so it grows and shrinks with the quarter picker. Undated work is
   // placed by its quarter tag, as in the undated list.
   const progOptions = useMemo(()=>{
@@ -1534,7 +1534,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     ? weekBuckets.reduce((a,b)=>a+weekCapOf(t,b),0)
     : t.wk100*WEEKS*nQ;                       // no dates exposed: flat quarter
   // Other work is load, not lost capacity: 40% standing work reads as 40% before
-  // any programme is added, and programmes stack on top of it.
+  // any program is added, and programs stack on top of it.
   const otherWeekOf = (t, bucket) => capWeighted(t, bucket, otherShareOn);
   const otherOf = t => weekBuckets.reduce((a,b)=>a+otherWeekOf(t,b),0);
   const loadOf = t => demandOf(t) + otherOf(t);
@@ -1601,7 +1601,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return pl.filter(pp=>!pp.leader).reduce((a,pp)=>a+(pp.share==null ? 1 : pp.share), 0);
   };
 
-  // The programmes contributing to each team inside the selection.
+  // The programs contributing to each team inside the selection.
   const teamProgs = useMemo(()=>{
     const m = new Map();
     if(!hasDates) return m;
@@ -1624,7 +1624,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return out;
   },[rows, rowDays, selBounds, hasDates]);
 
-  // A combined card lists each programme once, with both teams' hours on it.
+  // A combined card lists each program once, with both teams' hours on it.
   const progsOf = t => {
     if(!t.parts) return teamProgs.get(t.n) || [];
     const m = new Map();
@@ -1638,9 +1638,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     return [...m.values()].sort(bySizeThenHours);
   };
 
-  // Hours by size inside the selection, using each team's own sizing: a programme
+  // Hours by size inside the selection, using each team's own sizing: a program
   // Events sized L counts as L here even if another team sized it M. A combined
-  // card sums its members, so a programme sized differently by each appears under
+  // card sums its members, so a program sized differently by each appears under
   // both sizes. Unsized work gets its own row rather than disappearing.
   // With `days` (a pinned week) it counts only those days, so the table follows
   // the week the card is showing; without, the whole selection.
@@ -1733,7 +1733,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         total += h;
         byProg.set(x.pname, (byProg.get(x.pname)||0) + h);
       });
-      // The busiest week, and how many programmes are running in it.
+      // The busiest week, and how many programs are running in it.
       let peakWeek = null, peakLoad = -1;
       perWeek.forEach((v,w)=>{ if(v>peakLoad){ peakLoad=v; peakWeek=w; } });
       const peakProgs = peakWeek!=null ? (progsPerWeek.get(peakWeek)||new Set()).size : 0;
@@ -1750,14 +1750,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
       const top3 = sorted.slice(0,3).reduce((a,[,v])=>a+v, 0);
       if(parts.length<2 && sorted.length>=3 && top3/total >= 0.65)
-        parts.push('3 programmes are '+pct(top3/total)+'% of the load');
+        parts.push('3 programs are '+pct(top3/total)+'% of the load');
 
       const heads = fteOf(t);
       const need = heads ? Math.round(total/full*heads) : null;
       if(parts.length<2 && need && need >= Math.round(heads)+1)
         parts.push(fmt(total)+' hrs equates to ~'+need+' people, team has '+fmtHeads(heads));
 
-      // Sizing: a wall of large programmes is a different problem from many small ones.
+      // Sizing: a wall of large programs is a different problem from many small ones.
       if(parts.length<2){
         const big = progsOf(t).filter(pp=>pp.size==='L' || pp.size==='XL');
         const xl = big.filter(pp=>pp.size==='XL').length, lg = big.length - xl;
@@ -1765,17 +1765,17 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
           const bits = [];
           if(xl) bits.push(xl+' XL');
           if(lg) bits.push(lg+' L');
-          parts.push(bits.join(' and ')+' programme'+(xl+lg===1?'':'s')+' this quarter');
+          parts.push(bits.join(' and ')+' program'+(xl+lg===1?'':'s')+' this quarter');
         }
       }
 
       let usedOverlap = false;
       if(parts.length<2 && peakWeek && peakProgs >= 4){
-        parts.push(peakProgs+' programmes overlap in the busiest week');
+        parts.push(peakProgs+' programs overlap in the busiest week');
         usedOverlap = true;
       }
       if(parts.length<2 && !usedOverlap && sorted.length>=10)
-        parts.push(sorted.length+' programmes in one quarter');
+        parts.push(sorted.length+' programs in one quarter');
 
       if(parts.length) m.set(t.n, parts.slice(0,2).join(' · '));
     });
@@ -1867,7 +1867,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {hasTradeOff && <Dropdown label="Trade off" options={TO_OPTIONS} selected={selTo}
           onToggle={o=>setSelTo(()=>{const n=new Set(selTo); n.has(o)?n.delete(o):n.add(o); return n;})}
           onSetAll={next=>setSelTo(next)} onReset={()=>setSelTo(new Set(TO_OPTIONS))}/>}
-        {(progOptions.length>0 || progOn) && <Dropdown label="Programme" options={progOptions} selected={selProg}
+        {(progOptions.length>0 || progOn) && <Dropdown label="Program" options={progOptions} selected={selProg}
           onToggle={toggleProg} onSetAll={setProgAll}
           onReset={()=>setProgF({mode:'out', names:new Set()})}/>}
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
@@ -1882,8 +1882,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {hasType && selTy.size<TYPE_OPTIONS.length && <>{' · '}<b>{selTy.size ? [...selTy].join(', ') + ' only' : 'no type selected'}</b></>}
         {hasTradeOff && selTo.size<TO_OPTIONS.length && <>{' · '}<b>{selTo.size ? [...selTo].join(', ') + ' only' : 'no trade-off option selected'}</b></>}
         {progOn && <>{' · '}<b>{progF.mode==='only'
-          ? (progF.names.size===0 ? 'no programmes selected' : progF.names.size+' programme'+(progF.names.size===1?'':'s')+' only')
-          : progF.names.size+' programme'+(progF.names.size===1?'':'s')+' excluded'}</b></>}
+          ? (progF.names.size===0 ? 'no programs selected' : progF.names.size+' program'+(progF.names.size===1?'':'s')+' only')
+          : progF.names.size+' program'+(progF.names.size===1?'':'s')+' excluded'}</b></>}
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status so only Capacity Planning, Approved for Brief & Strategy and In Production count</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
@@ -1921,7 +1921,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       </button>
       {openSections.teams && <div className="grid">
         {cards.map(t=>{
-          // d is programme hours; load adds the team's other work on top.
+          // d is program hours; load adds the team's other work on top.
           const wk=wkOf(t), noCap=wk===0, full=fullCapOf(t), d=demandOf(t), oth=otherOf(t), load=d+oth;
           const progs = progsOf(t), canEdit = canEditSplits;
           const ppl = peopleOf(t), fte = fteOf(t);
@@ -1994,7 +1994,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                   const h = sizes.reduce((a,r)=>a+r.hrs, 0) + (othHrs>0.5 ? othHrs : 0);
                   const share = v => (noCap || base<=0) ? '—' : (v>0 && v/base<0.005 ? '<1%' : pct(v/base)+'%');
                   return <>{head}<table className="sizes" title={"% is of this team's capacity for the "+(wkPinned?'pinned week':'selected period')+", so the rows add up to the figure above"}>
-                    <thead><tr><th>Size</th><th className="n">Programmes</th><th className="n">Hours</th><th className="n">%</th><th/></tr></thead>
+                    <thead><tr><th>Size</th><th className="n">Programs</th><th className="n">Hours</th><th className="n">%</th><th/></tr></thead>
                     <tbody>
                       {sizes.map(r=>(
                         <tr key={r.size}>
@@ -2046,7 +2046,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                 const open = openOther.has(t.n);
                 return <div className="ofoot">
                   <button className="pcount" onClick={()=>toggleOther(t.n)} aria-expanded={open}
-                    title="Hours this team sets aside for work outside programmes">
+                    title="Hours this team sets aside for work outside programs">
                     Other work{setAside>0.5 ? ' · '+fmt(setAside)+' hrs set aside' : mine.length ? '' : ' · none'}
                     <span>{open?'▾':'▸'}</span>
                   </button>
@@ -2062,8 +2062,8 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
                     <span>{openTeams.has(t.n)?'▾':'▸'}</span>
                   </button>
                   {progs.length>0 && <button className="pcount" onClick={()=>toggleProgs(t.n)}
-                    title="Programmes this team is assigned to in the selected quarter">
-                    {progs.length} programme{progs.length===1?'':'s'}
+                    title="Programs this team is assigned to in the selected quarter">
+                    {progs.length} program{progs.length===1?'':'s'}
                     <span>{openProgs.has(t.n)?'▾':'▸'}</span>
                   </button>}
                   <a className="pgo" href={PEOPLE_PAGE} target="_blank" rel="noopener noreferrer">People ↗</a>
@@ -2134,7 +2134,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         </button>
         {openSections.nodate && <>
           <div className="ctx">
-            <b>{fmt(undated.total)} hrs</b> across <b>{undated.progs.length}</b> programme{undated.progs.length===1?'':'s'}
+            <b>{fmt(undated.total)} hrs</b> across <b>{undated.progs.length}</b> program{undated.progs.length===1?'':'s'}
             {' '}have a missing or backwards work date, so they cannot be placed in a week and are counted
             nowhere above. The <b>Issue</b> column says which one. Fill it and they appear —
             no reload needed.
@@ -2145,7 +2145,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
             ))}
           </div>
           <table>
-            <thead><tr><th>Programme</th><th className="num">Hours</th><th>Issue</th><th>Teams waiting</th></tr></thead>
+            <thead><tr><th>Program</th><th className="num">Hours</th><th>Issue</th><th>Teams waiting</th></tr></thead>
             <tbody>
               {undated.progs.map(pr=>(
                 <tr key={pr.id||pr.name}>
