@@ -48,13 +48,17 @@ const HOL = {table:'tblR2HjOPhwqZwOD3', date:'fldohX95jG7q7XaET', coes:'fldvq3Ni
 
 const PROG = {table:'tblxbXHBPVWUeT0Ea', bu:'fldJmSYJeMYm9q4kb', test:'fldgr5Knddb8qNG0V', crit:'fldfW60SpnS5OCaD2',
               quarter:'fldqLH3o8sKQBpmAG', year:'fld5YsbzzS8KgeiEd', status:'fldQC3pDyuD69dvTN',
-              type:'fldtWanc3C9gK753M'};
+              type:'fldtWanc3C9gK753M', tradeoff:'fldl471hpuGXxUffT'};
 
 // Planned / Unplanned, on Programs; allocations carry a lookup of it. A programme
 // with neither choice set is treated as planned, the way nearly all work is.
 const TYPE_PLANNED = 'Quarterly Planned', TYPE_UNPLANNED = 'Unplanned Request';
 const TYPE_OPTIONS = [TYPE_PLANNED, TYPE_UNPLANNED];
 const isUnplanned = name => norm(name)===norm(TYPE_UNPLANNED);
+
+// Trade Off, a checkbox on Programs. The filter offers both sides; both are on by default.
+const TO_YES = 'Trade off', TO_NO = 'Not a trade off';
+const TO_OPTIONS = [TO_YES, TO_NO];
 
 const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','YAds','Fantasy'];
 const WEEKS = 13;
@@ -1087,6 +1091,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const hasProgType = !!progTable.getFieldByIdIfExists(PROG.type);
   const hasAllocType = !!allocTable.getFieldByIdIfExists(ALLOC.type);
   const hasType = hasProgType || hasAllocType;
+  const hasTradeOff = !!progTable.getFieldByIdIfExists(PROG.tradeoff);
   const hasStatusField = hasProgStatus || hasAllocStatus;
 
   // program → {bu, test, crit, q, y}
@@ -1100,6 +1105,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       const stSel = hasProgStatus ? r.getCellValue(PROG.status) : null;
       const tySel = hasProgType ? r.getCellValue(PROG.type) : null;
       m.set(r.id, {
+        name: String(r.name||'').trim(),
         bu: buLink ? buLink.name : 'Unassigned',
         test: r.getCellValue(PROG.test)===true,
         crit: !!(crit && crit.name && crit.name.toUpperCase()==='YES'),
@@ -1107,10 +1113,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         y: (ySel && ySel.name) ? String(ySel.name).trim() : null,
         st: (stSel && stSel.name) ? String(stSel.name).trim() : null,
         ty: (tySel && tySel.name) ? String(tySel.name).trim() : null,
+        tradeoff: hasTradeOff ? r.getCellValue(PROG.tradeoff)===true : false,
       });
     });
     return m;
-  },[progRecords, hasQuarterField, hasYearField, hasProgStatus, hasProgType]);
+  },[progRecords, hasQuarterField, hasYearField, hasProgStatus, hasProgType, hasTradeOff]);
 
   // allocations → normalized rows, before the Type filter
   const allRows = useMemo(()=>{
@@ -1150,6 +1157,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         // Same order as status: the programme's own field, then the allocation's lookup.
         unplanned: isUnplanned((pm && pm.ty) ? pm.ty
                     : (hasAllocType ? lookupText(r.getCellValue(ALLOC.type)) : null)),
+        tradeoff: pm ? pm.tradeoff : false,
         size: hasSize ? sizeOf(firstLink(r.getCellValue(ALLOC.size))?.name) : null,
         s: hasDates ? parseDate(r.getCellValue(ALLOC.start)) : null,
         e: hasDates ? parseDate(r.getCellValue(ALLOC.end)) : null,
@@ -1159,12 +1167,31 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     //   allocation whose programme the extension cannot see.
   },[allocRecords, progMap, hasAllocStatus, hasStatusField, hasAllocType, hasDates, hasSize]);
 
-  // Type filter. Everything below reads `rows`, so cards, totals, the timeline and
-  // the business-unit table all follow it. Periods and day spreads are built from
-  // every row, so switching type never takes a quarter out of the list.
+  // Type and Trade Off filters. Everything below reads `rows`, so cards, totals, the
+  // timeline and the business-unit table all follow them; the Programs counted box
+  // applies the same test through progPasses. Periods and day spreads are built from
+  // every row, so switching a filter never takes a quarter out of the list.
   const [selTy, setSelTy] = useState(()=>new Set(TYPE_OPTIONS));
-  const rows = useMemo(()=>(!hasType || selTy.size===TYPE_OPTIONS.length) ? allRows
-    : allRows.filter(x=>selTy.has(x.unplanned ? TYPE_UNPLANNED : TYPE_PLANNED)),[allRows, selTy, hasType]);
+  const [selTo, setSelTo] = useState(()=>new Set(TO_OPTIONS));
+  // Programme filter. Holds the names left OUT, so every programme is ticked by
+  // default and one added later shows up ticked too. Untick to exclude ("is not");
+  // Clear then tick to show only those ("is").
+  const [exProg, setExProg] = useState(()=>new Set());
+  const progOptions = useMemo(()=>{
+    const names = new Set();
+    allRows.forEach(x=>{ if(!x.isDropped && !x.test && x.pname) names.add(String(x.pname).trim()); });
+    return [...names].sort((a,b)=>a.localeCompare(b));
+  },[allRows]);
+  const selProg = useMemo(()=>new Set(progOptions.filter(n=>!exProg.has(n))),[progOptions, exProg]);
+  const typeOn = hasType && selTy.size<TYPE_OPTIONS.length;
+  const toOn = hasTradeOff && selTo.size<TO_OPTIONS.length;
+  const progOn = exProg.size>0;
+  const passes = (unplanned, tradeoff, name) =>
+    (!typeOn || selTy.has(unplanned ? TYPE_UNPLANNED : TYPE_PLANNED)) &&
+    (!toOn || selTo.has(tradeoff ? TO_YES : TO_NO)) &&
+    (!progOn || selProg.has(String(name||'').trim()));
+  const rows = useMemo(()=>(!typeOn && !toOn && !progOn) ? allRows
+    : allRows.filter(x=>passes(x.unplanned, x.tradeoff, x.pname)),[allRows, selTy, selTo, selProg, typeOn, toOn, progOn]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -1765,10 +1792,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     progMap.forEach(pm=>{
       if(pm.test) return;
       if(hasStatusField && !isCounted(pm.st)) return;
+      if(!passes(isUnplanned(pm.ty), pm.tradeoff, pm.name)) return;
       if(inQ(qKey(pm.q, pm.y))) n++;
     });
     return n;
-  },[progMap, selQ, hasStatusField]);
+  },[progMap, selQ, hasStatusField, selTy, selTo, selProg, typeOn, toOn, progOn]);
   // Net of holidays and of part-weeks at the period edges, like the cards. A flat
   // 13 x weekly hours quietly disagreed with every figure underneath it. The base's
   // own 70% field sets the ratio, rather than assuming it is exactly 0.70.
@@ -1813,6 +1841,13 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {hasType && <Dropdown label="Type" options={TYPE_OPTIONS} selected={selTy}
           onToggle={o=>setSelTy(()=>{const n=new Set(selTy); n.has(o)?n.delete(o):n.add(o); return n;})}
           onSetAll={next=>setSelTy(next)} onReset={()=>setSelTy(new Set(TYPE_OPTIONS))}/>}
+        {hasTradeOff && <Dropdown label="Trade off" options={TO_OPTIONS} selected={selTo}
+          onToggle={o=>setSelTo(()=>{const n=new Set(selTo); n.has(o)?n.delete(o):n.add(o); return n;})}
+          onSetAll={next=>setSelTo(next)} onReset={()=>setSelTo(new Set(TO_OPTIONS))}/>}
+        {progOptions.length>0 && <Dropdown label="Programme" options={progOptions} selected={selProg}
+          onToggle={o=>setExProg(()=>{const n=new Set(exProg); n.has(o)?n.delete(o):n.add(o); return n;})}
+          onSetAll={next=>setExProg(new Set(progOptions.filter(n=>!next.has(n))))}
+          onReset={()=>setExProg(new Set())}/>}
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
@@ -1823,6 +1858,10 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         Showing <b>{selQ.size===0 ? 'nothing' : [...selQ].sort((a,b)=>periodSort(a)-periodSort(b)).join(', ')}</b>
         {' · '}<b>{shown.length}</b> of {listed.length} teams
         {hasType && selTy.size<TYPE_OPTIONS.length && <>{' · '}<b>{selTy.size ? [...selTy].join(', ') + ' only' : 'no type selected'}</b></>}
+        {hasTradeOff && selTo.size<TO_OPTIONS.length && <>{' · '}<b>{selTo.size ? [...selTo].join(', ') + ' only' : 'no trade-off option selected'}</b></>}
+        {progOn && <>{' · '}<b>{selProg.size===0 ? 'no programmes selected'
+          : selProg.size<=exProg.size ? selProg.size+' programme'+(selProg.size===1?'':'s')+' only'
+          : exProg.size+' programme'+(exProg.size===1?'':'s')+' excluded'}</b></>}
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status so only Capacity Planning, Approved for Brief & Strategy and In Production count</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
