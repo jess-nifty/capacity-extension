@@ -1173,25 +1173,24 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   // every row, so switching a filter never takes a quarter out of the list.
   const [selTy, setSelTy] = useState(()=>new Set(TYPE_OPTIONS));
   const [selTo, setSelTo] = useState(()=>new Set(TO_OPTIONS));
-  // Programme filter. Holds the names left OUT, so every programme is ticked by
-  // default and one added later shows up ticked too. Untick to exclude ("is not");
-  // Clear then tick to show only those ("is").
-  const [exProg, setExProg] = useState(()=>new Set());
-  const progOptions = useMemo(()=>{
-    const names = new Set();
-    allRows.forEach(x=>{ if(!x.isDropped && !x.test && x.pname) names.add(String(x.pname).trim()); });
-    return [...names].sort((a,b)=>a.localeCompare(b));
-  },[allRows]);
-  const selProg = useMemo(()=>new Set(progOptions.filter(n=>!exProg.has(n))),[progOptions, exProg]);
+  // Programme filter, in one of two modes so it keeps its meaning when the quarters
+  // change. 'out': the named programmes are excluded and everything else shows,
+  // including programmes from a newly added quarter ("is not"; the default, with
+  // nothing named). 'only': just the named programmes show ("is"; reached by Clear).
+  const [progF, setProgF] = useState(()=>({mode:'out', names:new Set()}));
   const typeOn = hasType && selTy.size<TYPE_OPTIONS.length;
   const toOn = hasTradeOff && selTo.size<TO_OPTIONS.length;
-  const progOn = exProg.size>0;
+  const progOn = progF.mode==='only' || progF.names.size>0;
+  const progOk = name => {
+    const n = String(name||'').trim();
+    return progF.mode==='only' ? progF.names.has(n) : !progF.names.has(n);
+  };
   const passes = (unplanned, tradeoff, name) =>
     (!typeOn || selTy.has(unplanned ? TYPE_UNPLANNED : TYPE_PLANNED)) &&
     (!toOn || selTo.has(tradeoff ? TO_YES : TO_NO)) &&
-    (!progOn || selProg.has(String(name||'').trim()));
+    (!progOn || progOk(name));
   const rows = useMemo(()=>(!typeOn && !toOn && !progOn) ? allRows
-    : allRows.filter(x=>passes(x.unplanned, x.tradeoff, x.pname)),[allRows, selTy, selTo, selProg, typeOn, toOn, progOn]);
+    : allRows.filter(x=>passes(x.unplanned, x.tradeoff, x.pname)),[allRows, selTy, selTo, progF, typeOn, toOn, progOn]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -1292,6 +1291,30 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     dm.forEach((h,d)=>{ if(inSel(d)) hit += h; });
     return hit;
   };
+
+  // The Programme filter offers only programmes with counted hours in the selected
+  // period(s), so it grows and shrinks with the quarter picker. Undated work is
+  // placed by its quarter tag, as in the undated list.
+  const progOptions = useMemo(()=>{
+    const names = new Set();
+    allRows.forEach(x=>{
+      if(x.isDropped || x.test || !x.pname) return;
+      const h = hoursInSel(x);
+      if(h==null ? inQ(x.qk) : h>0) names.add(String(x.pname).trim());
+    });
+    return [...names].sort((a,b)=>a.localeCompare(b));
+  },[allRows, rowDays, selBounds, selQ, hasDates]);
+  const selProg = useMemo(()=>new Set(progOptions.filter(progOk)),[progOptions, progF]);
+  const toggleProg = n => setProgF(f=>{
+    const names = new Set(f.names);
+    names.has(n) ? names.delete(n) : names.add(n);
+    return {mode:f.mode, names};
+  });
+  // Select all / Reset go back to everything; Clear switches to "only these", empty.
+  const setProgAll = next => setProgF(
+    next.size===0 ? {mode:'only', names:new Set()}
+    : next.size>=progOptions.length ? {mode:'out', names:new Set()}
+    : {mode:'only', names:new Set(next)});
 
   // The bars on screen, each holding the working days it charges. A period rarely
   // starts on a Monday, and the days before that Monday are not a week of their own:
@@ -1796,7 +1819,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       if(inQ(qKey(pm.q, pm.y))) n++;
     });
     return n;
-  },[progMap, selQ, hasStatusField, selTy, selTo, selProg, typeOn, toOn, progOn]);
+  },[progMap, selQ, hasStatusField, selTy, selTo, progF, typeOn, toOn, progOn]);
   // Net of holidays and of part-weeks at the period edges, like the cards. A flat
   // 13 x weekly hours quietly disagreed with every figure underneath it. The base's
   // own 70% field sets the ratio, rather than assuming it is exactly 0.70.
@@ -1844,10 +1867,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {hasTradeOff && <Dropdown label="Trade off" options={TO_OPTIONS} selected={selTo}
           onToggle={o=>setSelTo(()=>{const n=new Set(selTo); n.has(o)?n.delete(o):n.add(o); return n;})}
           onSetAll={next=>setSelTo(next)} onReset={()=>setSelTo(new Set(TO_OPTIONS))}/>}
-        {progOptions.length>0 && <Dropdown label="Programme" options={progOptions} selected={selProg}
-          onToggle={o=>setExProg(()=>{const n=new Set(exProg); n.has(o)?n.delete(o):n.add(o); return n;})}
-          onSetAll={next=>setExProg(new Set(progOptions.filter(n=>!next.has(n))))}
-          onReset={()=>setExProg(new Set())}/>}
+        {(progOptions.length>0 || progOn) && <Dropdown label="Programme" options={progOptions} selected={selProg}
+          onToggle={toggleProg} onSetAll={setProgAll}
+          onReset={()=>setProgF({mode:'out', names:new Set()})}/>}
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
@@ -1859,9 +1881,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {' · '}<b>{shown.length}</b> of {listed.length} teams
         {hasType && selTy.size<TYPE_OPTIONS.length && <>{' · '}<b>{selTy.size ? [...selTy].join(', ') + ' only' : 'no type selected'}</b></>}
         {hasTradeOff && selTo.size<TO_OPTIONS.length && <>{' · '}<b>{selTo.size ? [...selTo].join(', ') + ' only' : 'no trade-off option selected'}</b></>}
-        {progOn && <>{' · '}<b>{selProg.size===0 ? 'no programmes selected'
-          : selProg.size<=exProg.size ? selProg.size+' programme'+(selProg.size===1?'':'s')+' only'
-          : exProg.size+' programme'+(exProg.size===1?'':'s')+' excluded'}</b></>}
+        {progOn && <>{' · '}<b>{progF.mode==='only'
+          ? (progF.names.size===0 ? 'no programmes selected' : progF.names.size+' programme'+(progF.names.size===1?'':'s')+' only')
+          : progF.names.size+' programme'+(progF.names.size===1?'':'s')+' excluded'}</b></>}
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
         {!hasStatusField && <span className="warn">{' · '}Turn on Program Status so only Capacity Planning, Approved for Brief & Strategy and In Production count</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
