@@ -77,7 +77,10 @@ const clearSticky = () => { try{ Object.keys(window.localStorage).filter(k=>k.st
 const TO_YES = 'Trade off', TO_NO = 'Not a trade off';
 const TO_OPTIONS = [TO_YES, TO_NO];
 
-const BU_ORDER = ['Mail','Finance','Search','Newsgroup','Sports','Brand','DSP','YAds','Fantasy'];
+// Mirrors the Business Units table. A BU that a program links to but that is missing
+// here is still shown, after these, so a new BU appears without a code change.
+const BU_ORDER = ['Mail','Finance','Search','News','Sports','Brand','DSP','YAds','Fantasy',
+  'Games','Home','Weather','Performance Marketing','Events','B2B'];
 const WEEKS = 13;
 
 // Only programs the team has taken on count: Capacity Planning, Approved for Brief &
@@ -1812,17 +1815,19 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
 
   // BU table (respects team + quarter filters)
-  const buAgg = {}; BU_ORDER.forEach(b=>buAgg[b]={sub:0,acc:0,crit:0});
+  const buList = [...BU_ORDER, ...[...new Set(rows.map(x=>x.bu))]
+    .filter(b=>b!=='Unassigned' && !BU_ORDER.includes(b)).sort()];
+  const buAgg = {}; buList.forEach(b=>buAgg[b]={sub:0,acc:0,crit:0});
   rows.forEach(x=>{
     if(!coeSelected(x.coe)) return;
-    if(!buAgg[x.bu]) return; // Unassigned & others not shown
+    if(!buAgg[x.bu]) return; // Unassigned not shown
     if(x.isDropped) return;                       // only counted statuses
     const h = hoursInSel(x) || 0;                  // placed by date, like the cards
     buAgg[x.bu].sub += h;
     if(!hasStatusField || x.isAccepted) buAgg[x.bu].acc += x.acc;
     if(x.crit) buAgg[x.bu].crit += h;
   });
-  const tot = {sub:0,acc:0,crit:0}; BU_ORDER.forEach(b=>{tot.sub+=buAgg[b].sub;tot.acc+=buAgg[b].acc;tot.crit+=buAgg[b].crit;});
+  const tot = {sub:0,acc:0,crit:0}; buList.forEach(b=>{tot.sub+=buAgg[b].sub;tot.acc+=buAgg[b].acc;tot.crit+=buAgg[b].crit;});
 
   const shown = listed.filter(t=>selTeams.has(t.n));
   // Counted from Programs, not from allocations: the overwhelming majority of live
@@ -1938,7 +1943,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         <thead><tr><th>Business Unit</th><th className="num">Hours</th>
           <th className="num">Business-critical hrs</th><th className="num acc">Accepted hrs</th></tr></thead>
         <tbody>
-          {BU_ORDER.map(b=>(
+          {buList.map(b=>(
             <tr key={b}><td><b>{b}</b></td>
               <td className="num">{fmt(buAgg[b].sub)}</td>
               <td className="num">{fmt(buAgg[b].crit)}</td>
