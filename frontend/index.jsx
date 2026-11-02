@@ -78,9 +78,11 @@ const TO_YES = 'Trade off', TO_NO = 'Not a trade off';
 const TO_OPTIONS = [TO_YES, TO_NO];
 
 // Mirrors the Business Units table. A BU that a program links to but that is missing
-// here is still shown, after these, so a new BU appears without a code change.
+// here is still shown, after these, so a new BU appears without a code change —
+// unless it is in BU_HIDDEN.
 const BU_ORDER = ['Mail','Finance','Search','News','Sports','Brand','DSP','YAds','Fantasy',
-  'Games','Home','Weather','Performance Marketing','Events','B2B'];
+  'Games','Home','Weather'];
+const BU_HIDDEN = ['Performance Marketing','Events','B2B'];
 const WEEKS = 13;
 
 // Only programs the team has taken on count: Capacity Planning, Approved for Brief &
@@ -1816,11 +1818,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
 
   // BU table (respects team + quarter filters)
   const buList = [...BU_ORDER, ...[...new Set(rows.map(x=>x.bu))]
-    .filter(b=>b!=='Unassigned' && !BU_ORDER.includes(b)).sort()];
+    .filter(b=>b!=='Unassigned' && !BU_ORDER.includes(b) && !BU_HIDDEN.includes(b)).sort()];
   const buAgg = {}; buList.forEach(b=>buAgg[b]={sub:0,acc:0,crit:0});
   rows.forEach(x=>{
     if(!coeSelected(x.coe)) return;
-    if(!buAgg[x.bu]) return; // Unassigned not shown
+    if(!buAgg[x.bu]) return; // Unassigned and hidden BUs not shown
     if(x.isDropped) return;                       // only counted statuses
     const h = hoursInSel(x) || 0;                  // placed by date, like the cards
     buAgg[x.bu].sub += h;
