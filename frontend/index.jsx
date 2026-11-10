@@ -86,8 +86,9 @@ const BU_HIDDEN = ['Performance Marketing','Events','B2B'];
 const WEEKS = 13;
 
 // Only programs the team has taken on count: Capacity Planning, Approved for Brief &
-// Strategy and In Production. Everything else — Backlog, Submitted, Sent Back, In Review,
-// Rejected, Cancelled, or no status at all — is left out of every figure. This differs
+// Strategy, Ready for Production and In Production. Everything else — Backlog, Submitted,
+// Sent Back, In Review, Rejected, Cancelled, Completed, or no status at all — is left out
+// of every figure. This differs
 // from the "Accepted & Submitted Capacity Planning" dashboard, which counts submitted
 // work too. Choice names are compared normalised, as some carry stray spaces in the base.
 // CoEs that are never real delivery capacity, so they are dropped from the team
@@ -134,7 +135,7 @@ const programUrl = id => PROGRAM_PAGE + '/' + id;
 // The statuses that count. "Accepted - Capacity Planning" and "Approved to Submit Brief"
 // are earlier names of Capacity Planning and Approved for Brief & Strategy, kept so
 // older records still match.
-const COUNTED_STATUSES = new Set(['Capacity Planning','Approved for Brief & Strategy','In Production',
+const COUNTED_STATUSES = new Set(['Capacity Planning','Approved for Brief & Strategy','Ready for Production','In Production',
                                   'Accepted - Capacity Planning','Approved to Submit Brief'].map(norm));
 const isCounted = st => COUNTED_STATUSES.has(norm(st));
 
@@ -1927,7 +1928,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
           ? (progF.names.size===0 ? 'no programs selected' : progF.names.size+' program'+(progF.names.size===1?'':'s')+' only')
           : progF.names.size+' program'+(progF.names.size===1?'':'s')+' excluded'}</b></>}
         {!hasQuarterField && <span className="warn">{' · '}Quarter isn't exposed on Programs — falling back to In Market Start Date</span>}
-        {!hasStatusField && <span className="warn">{' · '}Turn on Program Status so only Capacity Planning, Approved for Brief & Strategy and In Production count</span>}
+        {!hasStatusField && <span className="warn">{' · '}Turn on Program Status so only Capacity Planning, Approved for Brief & Strategy, Ready for Production and In Production count</span>}
         {!hasDates && <span className="warn">{' · '}Est. Work Start/End aren't exposed — falling back to the quarter tag, which overstates</span>}
       </div>
 
