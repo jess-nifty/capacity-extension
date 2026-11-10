@@ -142,6 +142,9 @@ const COUNTED_STATUSES = new Set(['Capacity Planning','Approved for Brief & Stra
                                   'In Progress','Ready',
                                   'Accepted - Capacity Planning','Approved to Submit Brief'].map(norm));
 const isCounted = st => COUNTED_STATUSES.has(norm(st));
+// Label for programs with no status, in the Status filter. Off by default, like any
+// status not in COUNTED_STATUSES.
+const NO_STATUS = '(No status)';
 
 // "Accepted & Submitted Capacity Planning" in the Marketing Operations interface.
 // The query string carries that page's own status filters, so the link lands on the
@@ -1208,6 +1211,45 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const [progF, setProgF] = useSticky('program', ()=>({mode:'out', names:new Set()}),
     {save: f=>({mode:f.mode, names:[...f.names]}),
      load: o=>({mode: o && o.mode==='only' ? 'only' : 'out', names: new Set((o && o.names) || [])})});
+  // Status filter. Opens on the statuses in COUNTED_STATUSES; users can tick others on
+  // (e.g. Completed) or counted ones off. Stored as changes from that default rather
+  // than as a list, so a status added or renamed in the base later still follows the
+  // default instead of silently dropping out for everyone who has used the filter.
+  const [stF, setStF] = useSticky('status', ()=>({add:new Set(), drop:new Set()}),
+    {save: f=>({add:[...f.add], drop:[...f.drop]}),
+     load: o=>({add:new Set((o && o.add) || []), drop:new Set((o && o.drop) || [])})});
+  const stOn = hasStatusField && (stF.add.size>0 || stF.drop.size>0);
+  // Options in the base's own order, then any other value the data carries (an older
+  // name held by a lookup, say), then "(No status)". Names are trimmed: some choices
+  // carry stray spaces.
+  const statusOptions = useMemo(()=>{
+    const out = [], seen = new Set();
+    const push = n => { const t = String(n||'').trim(); if(t && !seen.has(norm(t))){ seen.add(norm(t)); out.push(t); } };
+    const f = hasProgStatus ? progTable.getFieldByIdIfExists(PROG.status) : null;
+    ((f && f.options && f.options.choices) || []).forEach(c=>push(c.name));
+    let blank = false;
+    progMap.forEach(pm=>{ if(!pm.test){ pm.st ? push(pm.st) : (blank = true); } });
+    allRows.forEach(x=>{ x.st ? push(x.st) : (blank = true); });
+    if(blank) out.push(NO_STATUS);
+    return out;
+  },[progMap, allRows, hasProgStatus, progTable]);
+  const stLabel = st => {
+    const t = String(st||'').trim();
+    if(!t) return NO_STATUS;
+    return statusOptions.find(o=>norm(o)===norm(t)) || t;
+  };
+  const stOk = st => {
+    const l = stLabel(st);
+    return isCounted(l) ? !stF.drop.has(l) : stF.add.has(l);
+  };
+  const stDropped = st => hasStatusField && !stOk(st);
+  const selSt = useMemo(()=>new Set(statusOptions.filter(stOk)),[statusOptions, stF]);
+  const stFrom = next => ({
+    add: new Set(statusOptions.filter(o=>!isCounted(o) && next.has(o))),
+    drop: new Set(statusOptions.filter(o=>isCounted(o) && !next.has(o))),
+  });
+  const toggleSt = o => setStF(()=>{ const n = new Set(selSt); n.has(o) ? n.delete(o) : n.add(o); return stFrom(n); });
+
   const typeOn = hasType && selTy.size<TYPE_OPTIONS.length;
   const toOn = hasTradeOff && selTo.size<TO_OPTIONS.length;
   const progOn = progF.mode==='only' || progF.names.size>0;
@@ -1219,8 +1261,14 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     (!typeOn || selTy.has(unplanned ? TYPE_UNPLANNED : TYPE_PLANNED)) &&
     (!toOn || selTo.has(tradeoff ? TO_YES : TO_NO)) &&
     (!progOn || progOk(name));
-  const rows = useMemo(()=>(!typeOn && !toOn && !progOn) ? allRows
-    : allRows.filter(x=>passes(x.unplanned, x.tradeoff, x.pname)),[allRows, selTy, selTo, progF, typeOn, toOn, progOn]);
+  // The Status filter re-marks which rows are dropped; everything downstream already
+  // skips isDropped rows, so it follows without further changes.
+  const rows = useMemo(()=>{
+    let r = allRows;
+    if(stOn) r = r.map(x=>{ const ok = stOk(x.st); return {...x, isDropped: !ok, isAccepted: ok}; });
+    if(typeOn || toOn || progOn) r = r.filter(x=>passes(x.unplanned, x.tradeoff, x.pname));
+    return r;
+  },[allRows, selTy, selTo, progF, typeOn, toOn, progOn, stOn, stF, statusOptions]);
 
   // Options come from the data rather than a fixed Q1–Q4 list, so the dropdown
   // only offers quarters that work is actually scheduled in, and shows the year.
@@ -1328,12 +1376,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
   const progOptions = useMemo(()=>{
     const names = new Set();
     allRows.forEach(x=>{
-      if(x.isDropped || x.test || !x.pname) return;
+      if(stDropped(x.st) || x.test || !x.pname) return;
       const h = hoursInSel(x);
       if(h==null ? inQ(x.qk) : h>0) names.add(String(x.pname).trim());
     });
     return [...names].sort((a,b)=>a.localeCompare(b));
-  },[allRows, rowDays, selBounds, selQ, hasDates]);
+  },[allRows, rowDays, selBounds, selQ, hasDates, stF, statusOptions, hasStatusField]);
   const selProg = useMemo(()=>new Set(progOptions.filter(progOk)),[progOptions, progF]);
   const toggleProg = n => setProgF(f=>{
     const names = new Set(f.names);
@@ -1856,12 +1904,12 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
     let n = 0;
     progMap.forEach(pm=>{
       if(pm.test) return;
-      if(hasStatusField && !isCounted(pm.st)) return;
+      if(stDropped(pm.st)) return;
       if(!passes(isUnplanned(pm.ty), pm.tradeoff, pm.name)) return;
       if(inQ(qKey(pm.q, pm.y))) n++;
     });
     return n;
-  },[progMap, selQ, hasStatusField, selTy, selTo, progF, typeOn, toOn, progOn, period, rows, rowDays, selBounds]);
+  },[progMap, selQ, hasStatusField, selTy, selTo, progF, typeOn, toOn, progOn, stF, statusOptions, period, rows, rowDays, selBounds]);
   // Net of holidays and of part-weeks at the period edges, like the cards. A flat
   // 13 x weekly hours quietly disagreed with every figure underneath it. The base's
   // own 70% field sets the ratio, rather than assuming it is exactly 0.70.
@@ -1903,6 +1951,9 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         <Dropdown label="Teams" options={teamNames} selected={selTeams}
           onToggle={t=>setSelT(()=>{const n=new Set(selTeams); n.has(t)?n.delete(t):n.add(t); return n;})}
           onSetAll={next=>setSelT(next)} onReset={()=>setSelT(null)}/>
+        {hasStatusField && statusOptions.length>0 && <Dropdown label="Status" options={statusOptions} selected={selSt}
+          onToggle={toggleSt} onSetAll={next=>setStF(stFrom(next))}
+          onReset={()=>setStF({add:new Set(), drop:new Set()})}/>}
         {hasType && <Dropdown label="Type" options={TYPE_OPTIONS} selected={selTy}
           onToggle={o=>setSelTy(()=>{const n=new Set(selTy); n.has(o)?n.delete(o):n.add(o); return n;})}
           onSetAll={next=>setSelTy(next)} onReset={()=>setSelTy(new Set(TYPE_OPTIONS))}/>}
@@ -1912,11 +1963,11 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
         {(progOptions.length>0 || progOn) && <Dropdown label="Program" options={progOptions} selected={selProg}
           onToggle={toggleProg} onSetAll={setProgAll}
           onReset={()=>setProgF({mode:'out', names:new Set()})}/>}
-        {(selQRaw!=null || period!=='quarter' || selT!=null || typeOn || toOn || progOn || sortMode!=='az') &&
+        {(selQRaw!=null || period!=='quarter' || selT!=null || typeOn || toOn || progOn || stOn || sortMode!=='az') &&
           <button title="Put every filter back to its default. Your filters are otherwise remembered in this browser."
             onClick={()=>{ clearSticky(); setPeriod('quarter'); setSelQ(null); setSelT(null);
               setSelTy(new Set(TYPE_OPTIONS)); setSelTo(new Set(TO_OPTIONS));
-              setProgF({mode:'out', names:new Set()}); setSortMode('az'); }}>Reset filters</button>}
+              setProgF({mode:'out', names:new Set()}); setStF({add:new Set(), drop:new Set()}); setSortMode('az'); }}>Reset filters</button>}
         <button onClick={()=>setSortMode(m=>m==='az'?'za':(m==='za'?'busy':'az'))}>
           Sort: {sortMode==='az'?'A→Z':(sortMode==='za'?'Z→A':'busiest')}</button>
         <a className="ext" href={CAPACITY_PAGE_URL} target="_blank" rel="noopener noreferrer">
@@ -1926,6 +1977,7 @@ function Dashboard({coeTable, allocTable, progTable, holidays, peopleByTeam, peo
       <div className="ctx">
         Showing <b>{selQ.size===0 ? 'nothing' : [...selQ].sort((a,b)=>periodSort(a)-periodSort(b)).join(', ')}</b>
         {' · '}<b>{shown.length}</b> of {listed.length} teams
+        {stOn && <>{' · '}<b>{selSt.size ? 'Statuses: '+[...selSt].join(', ') : 'no status selected'}</b></>}
         {hasType && selTy.size<TYPE_OPTIONS.length && <>{' · '}<b>{selTy.size ? [...selTy].join(', ') + ' only' : 'no type selected'}</b></>}
         {hasTradeOff && selTo.size<TO_OPTIONS.length && <>{' · '}<b>{selTo.size ? [...selTo].join(', ') + ' only' : 'no trade-off option selected'}</b></>}
         {progOn && <>{' · '}<b>{progF.mode==='only'
