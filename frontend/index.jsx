@@ -135,10 +135,11 @@ const programUrl = id => PROGRAM_PAGE + '/' + id;
 // The statuses that count. "Accepted - Capacity Planning" and "Approved to Submit Brief"
 // are earlier names of Capacity Planning and Approved for Brief & Strategy, kept so
 // older records still match. "In Progress" is the planned new name for In Production,
-// listed ahead of the rename so it keeps counting either way. Statuses are matched by
+// listed ahead of the rename so it keeps counting either way; "Ready" likewise for a
+// possible shortening of Ready for Production. Statuses are matched by
 // name: any other rename needs adding here too, or that work drops out of every figure.
 const COUNTED_STATUSES = new Set(['Capacity Planning','Approved for Brief & Strategy','Ready for Production','In Production',
-                                  'In Progress',
+                                  'In Progress','Ready',
                                   'Accepted - Capacity Planning','Approved to Submit Brief'].map(norm));
 const isCounted = st => COUNTED_STATUSES.has(norm(st));
 
