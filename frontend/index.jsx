@@ -100,7 +100,7 @@ const isExcludedCoE = n => !n || [...EXCLUDED_COES].some(x=>norm(x)===norm(n));
 
 // Teams that exist and can be switched on, but are off when the page opens.
 // Matched on a normalised name because several carry trailing spaces in the base.
-const DEFAULT_OFF_COES = ['ASO','APAC Marketing','Brand & Marketing Research',
+const DEFAULT_OFF_COES = ['APAC Marketing','Brand & Marketing Research',
                           'Global Business & Experience (Operations)','Marketing Partnerships',
                           'Integrated B2B Marketing','Creative Lab','Product Marketing Management'];
 const isOffByDefault = n => DEFAULT_OFF_COES.some(x=>norm(x)===norm(n));
